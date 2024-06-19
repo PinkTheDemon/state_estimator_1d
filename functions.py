@@ -52,38 +52,10 @@ def delete_empty(M) :
 
 # input dim_state and output dim_output
 def ds2do(dim_input:int) : 
-    lookup_table = {
-        1: 2,
-        2: 4,
-        3: 7,
-        4: 11,
-        5: 16,
-        6: 22,
-        7: 29,
-        8: 37,
-        9: 46,
-    }
-    if dim_input in lookup_table : 
-        return lookup_table[dim_input]
-    else : 
-        return None
+    return dim_input*(dim_input+1) // 2 + 1
 
 def do2ds(dim_output:int) : 
-    lookup_table = {
-        2 : 1,
-        4 : 2,
-        7 : 3,
-        11: 4,
-        16: 5,
-        22: 6,
-        29: 7,
-        37: 8,
-        46: 9,
-    }
-    if dim_output in lookup_table : 
-        return lookup_table[dim_output]
-    else : 
-        return None
+    return int(np.sqrt(2*(dim_output-1)))
 
 
 def checkFilename(filename:str) -> str : 
@@ -149,6 +121,61 @@ def cholesky_unique(A): # 半正定矩阵的cholesky分解之一（可能因为�
         #     A_temp[1:,1:] = A_temp[1:,1:] - A_temp[1:, 0].reshape(-1,1)@A_temp[1:, 0].reshape(1,-1)/A_temp[0,0]
         #     L[1:,1:] = cholesky_unique(A_temp[1:, 1:])
         return L
+
+def isConverge(matrices:list, criterion=None, tol:float = 1e-4, **kwargs):
+    if criterion is None:
+        candidates = matrices[:]
+    else :
+        candidates = [criterion(matrix, **kwargs) for matrix in matrices]
+    candidate0 = candidates[0]
+    for candidate in candidates :
+        if (np.abs(candidate0 - candidate) < tol).all():
+            continue
+        else :
+            return False
+    return True
+
+class RandomGenerator : 
+    def __init__(self, randomFun:np.random, rand_num=111) -> None:
+        self.fun = randomFun
+        np.random.seed(rand_num)
+
+    def getRandom(self, **args) : 
+        result = self.fun(**args)
+        return result
+
+    def getRandomList(self, length, **args) : 
+        randomList = []
+        for _ in range(length) : 
+            randomList.append(self.getRandom(**args))
+        return randomList
+    
+def vectorize(M:np.array) -> np.array:
+    '''
+    对称矩阵化为向量,矩阵维度为n*n,向量长度为n(n+1)/2
+    '''
+    vec = None
+    for i in range(M.shape[0]):
+        if vec is None :
+            vec = np.copy(M[i,:i+1])
+        else :
+            vec = np.concatenate((vec, M[i,:i+1]))
+    indices = np.tril_indices(n=M.shape[0])
+    vec = 2*vec - M[indices[0], indices[1]]
+    return vec
+
+def vec2mat(vec:np.array) -> np.array:
+    '''
+    向量化为对称矩阵,向量长度为n(n+1)/2,矩阵维度为n*n
+    '''
+    ds = do2ds(vec.size + 1)
+    matrix = np.zeros((ds, ds))
+    indices = np.tril_indices(n=ds)
+    matrix[indices[0],indices[1]] += np.copy(vec)
+    matrix.T[indices[0], indices[1]] += np.copy(vec)
+    matrix = matrix / 2
+    return matrix
+
 
 '''
 P2o

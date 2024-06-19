@@ -1,108 +1,131 @@
 import numpy as np
-import torch
+import pickle
+import os
 
-from params import GP, MP
-from dynamics import f_fn, F_fn, h_fn, H_fn, u_fn
+import dynamics as dyn
+from params import def_param2, set_params
+from functions import LogFile
 
-# 分为Model 和 Dynamic i
-#region Model class
 class Model() : 
-    def __init__(self, f_fn=f_fn, F_fn=F_fn, h_fn=h_fn, H_fn=H_fn, u_fn=u_fn) -> None:
-        self.state_dim = MP.state_dim
-        self.obs_dim = MP.obs_dim
-        self.x0_mu = MP.x0_mu
-        self.P0 = MP.P0
-        self.Q = MP.Q
-        self.R = MP.R
-        self.f_fn = f_fn
-        self.F_fn = F_fn
-        self.u_fn = u_fn
-        self.h_fn = h_fn
-        self.H_fn = H_fn
-    # step forward
-    def step(self, xt, dt=None, ut=None, wt=None, vt=None) -> torch.float32:
-        if dt is None : 
-            dt = MP.dt
-        if ut is None :
-            ut = self.u_fn(xt=xt)
-        xt_p1 = self.f_fn(xt=xt, dt=dt, ut=ut, wt=wt)
-        yt_p1 = self.h_fn(xt=xt_p1, vt=vt)
-        return xt_p1, yt_p1
-    # generate data trajectory
-    def generate_data(self, maxsteps, w_mu=None, v_mu=None, randSeed=123) -> torch.float32:
-        # set random seed
-        np.random.seed(randSeed)
+    def __init__(self, dim_state, dim_obs, f, h, F, H, x0_mu, P0, Q, R, f_real=None, h_real=None) -> None:
+        self.dim_state = dim_state
+        self.dim_obs = dim_obs
+        self.f = f
+        self.h = h
+        self.F = F
+        self.H = H
+        self.x0_mu = x0_mu
+        self.P0 = P0
+        self.Q = Q
+        self.R = R
+        self.f_real = f if f_real is None else f_real
+        self.h_real = h if h_real is None else h_real
+
+    def step(self, x, u=None, disturb=None, noise=None) : 
+        x_next = self.f(x, u=u, disturb=disturb)
+        y_next = self.h(x_next, noise)
+        return x_next, y_next
+    
+    def step_real(self, x, u=None, disturb=None, noise=None) : 
+        x_next = self.f_real(x, u=u, disturb=disturb)
+        y_next = self.h_real(x_next, noise)
+        return x_next, y_next
+    
+    def generate_data(self, maxsteps, disturb_mu=None, noise_mu=None, is_mismatch=False, rand_seed=123) : 
+        np.random.seed(rand_seed)
         # 生成初始状态
         if self.P0.size == 0 : 
             initial_state = self.x0_mu
         else :
-            initial_state = np.random.multivariate_normal(self.x0_mu.cpu().numpy(), self.P0)
-            initial_state = torch.FloatTensor(initial_state, device=GP.device)
+            initial_state = self.x0_mu + (np.random.multivariate_normal(np.zeros_like(self.x0_mu), self.P0))
         # 噪声是否有偏
-        if w_mu is None : 
-            w_mu = np.zeros(self.Q.shape[0])
-        if v_mu is None : 
-            v_mu = np.zeros(self.R.shape[0])
+        if disturb_mu is None : 
+            disturb_mu = np.zeros(self.Q.shape[0])
+        if noise_mu is None : 
+            noise_mu = np.zeros(self.R.shape[0])
         # 生成噪声序列
         if self.Q.size == 0 : 
-            w_list = np.zeros((maxsteps, w_mu.size))
+            disturb_list = np.zeros((maxsteps, disturb_mu.size))
         else : 
-            w_list = np.random.multivariate_normal(w_mu, self.Q, maxsteps)
+            disturb_list = np.random.multivariate_normal(disturb_mu, self.Q, maxsteps)
         if self.R.size == 0 : 
-            v_list = np.zeros((maxsteps, v_mu.size))
+            noise_list = np.zeros((maxsteps, noise_mu.size))
         else : 
-            v_list = np.random.multivariate_normal(v_mu, self.R, maxsteps)
-        w_list = torch.FloatTensor(w_list, device=GP.device)
-        v_list = torch.FloatTensor(v_list, device=GP.device)
+            noise_list = np.random.multivariate_normal(noise_mu, self.R, maxsteps)
         # 生成状态序列和观测序列
         t_seq = range(maxsteps)
-        x_seq = [initial_state]
+        x_seq = []
         y_seq = []
+        x = initial_state
         for t in t_seq : # 真实轨迹
-            x_next, y_next = self.step(xt=x_seq[-1], wt=w_list[t], vt=v_list[t])
+            if is_mismatch : 
+                x_next, y_next = self.step_real(x, disturb=disturb_list[t], noise=noise_list[t])
+            else : 
+                x_next, y_next = self.step(x, disturb=disturb_list[t], noise=noise_list[t])
+            x = x_next
             x_seq.append(x_next)
             y_seq.append(y_next)
-        x_seq = torch.stack(x_seq)
-        y_seq = torch.stack(y_seq)
         return x_seq, y_seq
 
-#region to create a Model class
-def create_model() : 
-    # 创建模型
-    model = Model()
 
+def create_model(dim_state, dim_obs, x0_mu, P0, Q, R, f_real=None, h_real=None) : 
     # 验证模型和给定维度是否一致
-    x = torch.ones((MP.state_dim, ))
+    x = np.ones(dim_state)
     try : 
-        assert model.f_fn(x).shape == (MP.state_dim, )
-        assert model.h_fn(x).shape == (MP.obs_dim, )
+        assert dyn.f(x).shape == (dim_state, )
+        assert dyn.h(x).shape == (dim_obs, )
     except ValueError : 
-        raise ValueError("dynamic or observation functions do not match the model")
+        raise ValueError("dynamic or obvious functions do not match the model")
+    
+    # 创建模型
+    model = Model(dim_state=dim_state, dim_obs=dim_obs, f=dyn.f, h=dyn.h, F=dyn.F, H=dyn.H, x0_mu=x0_mu, P0=P0, Q=Q, R=R, f_real=f_real, h_real=h_real)
 
     return model
-#endregion
 
 #region generate some data trajectories and save them
-def generate_trajectories(steps, episodes, randSeed):
-    model = Model()
+def generate_trajectories(steps, episodes, randSeed, isMismatch=False):
+    #region 判断数据是否已经存在
+    dynamics = 'Dynamics2'
+    fileName = f"data/{dynamics}_steps{steps}_episodes{episodes}_randomSeed{randSeed}"
+    if isMismatch:
+        fileName += "_mismatch"
+    if os.path.isfile(fileName+".bin") :
+        print("Data file already exist, input \"y\" to regenerate : ", end="")
+        char = input()
+        if char != "y" :
+            return 
+    #endregion
+    args = def_param2()
+    model_paras_dict, _ = set_params(args=args)
+    if isMismatch : 
+        model_paras_dict["f_real"] = dyn.f_real
+        model_paras_dict["h_real"] = dyn.h_real
+    model = create_model(**model_paras_dict)
     trajs = {
         "x_batch": [],
         "y_batch": [],
     }
     for num in range(episodes):
-        x_seq, y_seq = model.generate_data(maxsteps=steps, randSeed=randSeed+num)
+        x_seq, y_seq = model.generate_data(maxsteps=steps, rand_seed=randSeed+num, is_mismatch=isMismatch)
         trajs["x_batch"].append(x_seq)
         trajs["y_batch"].append(y_seq)
-    trajs["x_batch"] = torch.stack(trajs["x_batch"])
-    trajs["y_batch"] = torch.stack(trajs["y_batch"])
 
-    # #region save trajectories and relative information
-    index = 1
-    status = 'simulate'
-    torch.save(trajs, f"data/{status}Data{index}.bin")
-    with open(f"data/{status}Data{index}.txt", "w") as file:
-        file.write(MP.__repr__())
+    #region save trajectories and relative information
+    with open(file=fileName+".bin", mode="wb") as f:
+        pickle.dump(trajs, f)
+    # relative information
+    log = LogFile(fileName=fileName+".txt")
+    print("args :")
+    for key, value in vars(args).items() : 
+        print(f"{key}: {value}")
+    print("")
+    print("Model parameters :")
+    for key, value in model_paras_dict.items() : 
+        print(f"{key}: {value}")
+    log.endLog()
+    #endregion
+    print("successfully generate data")
 #endregion
 
 if __name__ == "__main__":
-    generate_trajectories(steps=200, episodes=50, randSeed=10086)
+    generate_trajectories(steps=5000, episodes=1000, randSeed=0, isMismatch=False)

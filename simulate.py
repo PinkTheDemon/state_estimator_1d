@@ -1,32 +1,34 @@
 import time
+import pickle
 import numpy as np
-import torch
 import matplotlib.pyplot as plt
 
 import estimator as est
 from model import create_model
-from functions import inv, LogFile
-from params import args, MP
+from functions import inv, LogFile, isConverge
+from params import def_param2, set_params
 from plot import plotTrajectory
 
 dataFile = None
-# dataFile = "data/simulateData1.bin"
+dataFile = "data/Dynamics2_steps100_episodes100_randomSeed0.bin"
 
-def simulate(model, agent=None, sim_num=1, rand_seed=1111, STATUS='EKF', plot_flag=False, x_batch=None, y_batch=None) : 
+def simulate(model, args, agent=None, sim_num=1, rand_seed=1111, STATUS='EKF', plot_flag=False, x_batch=None, y_batch=None) : 
     #region 常用变量读取
-    ds = model.state_dim
+    ds = model.dim_state
     #endregion
     #region 初始化评价指标变量
-    MSE_avg = 0
-    RMSE_avg = 0
+    MSE_x_avg = 0
+    RMSE_x_avg = 0
+    MSE_y_avg = 0
+    RMSE_y_avg = 0
     execution_time = 0
     count = 0
     #endregion
     #region 估计器模型初始化
     if STATUS == 'PF' : 
-        pf = est.Particle_Filter(ds, model.obs_dim, int(1e4), model.f_fn, model.h_fn, model.x0_mu, model.P0)
+        pf = est.Particle_Filter(ds, model.dim_obs, int(1e4), model.f, model.h, model.x0_mu, model.P0)
     #endregion
-    #region 获取多条测试轨迹
+    #region 生成多条测试轨迹
     for i in range(sim_num) : 
         #region 设置随机数种子
         np.random.seed(rand_seed+i)
@@ -37,7 +39,7 @@ def simulate(model, agent=None, sim_num=1, rand_seed=1111, STATUS='EKF', plot_fl
             x_seq = x_batch[i]
             y_seq = y_batch[i]
         else : 
-            x_seq, y_seq = model.generate_data(maxsteps=args.max_sim_steps, randSeed=rand_seed+i)
+            x_seq, y_seq = model.generate_data(args.max_sim_steps, is_mismatch=args.MODEL_MISMATCH, rand_seed=rand_seed+i)
         #endregion
         #region 记录一条轨迹状态估计所需的cpu时间开始点
         start_time = time.process_time()
@@ -54,7 +56,7 @@ def simulate(model, agent=None, sim_num=1, rand_seed=1111, STATUS='EKF', plot_fl
                 result = est.NLSF_uniform(inv(args.P0_hat), y_seq=y_seq[:t+1], Q=model.Q, R=model.R, x0=initial_x, mode="quadratic", x0_bar=args.x0_hat)
                 x_hat_seq.append(result.x[-ds:])
                 # status_seq.append(result.status) # debug
-                initial_x = list(result.x.reshape(-1,3))[1:]
+                initial_x = list(result.x.reshape(-1,ds))[1:]
             # end for t(step)
             # print(f"status seq: {status_seq}") # debug
         elif 'MHE' not in STATUS.upper() : # 单步状态估计，EKF、UKF、PF
@@ -62,7 +64,11 @@ def simulate(model, agent=None, sim_num=1, rand_seed=1111, STATUS='EKF', plot_fl
             P_hat = args.P0_hat
             for t in t_seq : 
                 if STATUS.upper() == 'EKF' or STATUS.upper()=='INIT': 
+                    if t == 24:
+                        pass
                     x_next_hat, P_next_hat = est.EKF(x_hat, P_hat, y_seq[t], model.Q, model.R)
+                elif STATUS.upper() == 'IEKF' : 
+                    x_next_hat, P_next_hat = est.IEKF(x_hat, P_hat, y_seq[t], model.Q, model.R, times=70)
                 elif STATUS.upper() == 'UKF' : 
                     x_next_hat, P_next_hat = est.UKF(x_hat, P_hat, y_seq[t], model.Q, model.R)
                 elif STATUS.upper() == 'PF' : 
@@ -76,7 +82,7 @@ def simulate(model, agent=None, sim_num=1, rand_seed=1111, STATUS='EKF', plot_fl
                 P_hat = P_next_hat
             # end for t(step)
         elif 'RLF' in STATUS.upper() and 'MHE' in STATUS.upper() : # RL更新arrival cost的MHE
-            agent.reset(args.x0_hat, args.P0_hat)
+            agent.reset(x0_hat=args.x0_hat, P0_hat=args.P0_hat)
             # status_seq = [] # debug
             for t in t_seq : 
                 agent.estimate(y_seq[t], model.Q, model.R)
@@ -102,9 +108,9 @@ def simulate(model, agent=None, sim_num=1, rand_seed=1111, STATUS='EKF', plot_fl
                 x_hat_seq.append(x_next_hat)
                 #endregion
                 if t < args.window - 1 : # 窗口未满，x0_NLSF 和 P_hat无需更新
-                    initial_x = list(result.x.reshape(-1,3))
+                    initial_x = list(result.x.reshape(-1,ds))
                 else : # 窗口已满，用不同的方法更新x0_NLSF 和 P_hat
-                    initial_x = list(result.x.reshape(-1,3))[1:]
+                    initial_x = list(result.x.reshape(-1,ds))[1:]
                     if 'EKF' in STATUS : 
                         #region 09. Computing arrival cost parameters in moving horizon estimation using sampling based filters
                         # F = model.F(model.f(x0_NLSF))
@@ -125,15 +131,29 @@ def simulate(model, agent=None, sim_num=1, rand_seed=1111, STATUS='EKF', plot_fl
         execution_time += 1000 * (end_time - start_time) / args.max_sim_steps / sim_num
         #endregion
         #region 计算MSE指标
-        x_seq = x_seq[1:]
-        x_hat_seq = torch.stack(x_hat_seq)
-        MSE = torch.nn.functional.mse_loss(x_seq, x_hat_seq)
-        RMSE = np.sqrt(MSE)
-        MSE_avg += MSE / sim_num
-        RMSE_avg += RMSE / sim_num
+        # state MSE
+        x_seq = np.array(x_seq)
+        x_hat_seq = np.array(x_hat_seq).reshape((-1,ds))
+        MSE_x = np.square(x_seq - x_hat_seq).sum(0) / args.max_sim_steps
+        RMSE_x = np.sqrt(np.mean(MSE_x))
+        MSE_x_avg += MSE_x / sim_num
+        RMSE_x_avg += RMSE_x / sim_num
+        # observation MSE
+        y_seq = np.array(y_seq)
+        y_hat_seq = np.array(model.h(x=x_hat_seq, batch_first=True)).reshape((-1,model.dim_obs))
+        MSE_y = np.square(y_seq - y_hat_seq).sum(0) / args.max_sim_steps
+        RMSE_y = np.sqrt(np.mean(MSE_y))
+        MSE_y_avg += MSE_y / sim_num
+        RMSE_y_avg += RMSE_y / sim_num
         #endregion
         #region 统计RMSE大于4的数量
-        if RMSE > 4 : count += 1
+        if RMSE_x > 4 : 
+            count += 1
+        #endregion
+        #region 看P是否能收敛
+        if "RLF" not in STATUS.upper():
+            if isConverge(P_hat_seq[-5:], criterion=np.linalg.norm):
+                pass
         #endregion
     # end for i(sim_num)
     # 结果输出或绘制
@@ -141,7 +161,8 @@ def simulate(model, agent=None, sim_num=1, rand_seed=1111, STATUS='EKF', plot_fl
         return x_hat_seq, y_seq, P_hat_seq
     else : 
         #region 打印MSE和时间指标
-        print(f"MSE of {STATUS.upper()}: {MSE_avg}, RMSE: {RMSE_avg}")
+        print(f"state MSE of {STATUS.upper()}: {MSE_x_avg}, RMSE: {RMSE_x_avg}")
+        print(f"observation MSE of {STATUS.upper()}: {MSE_y_avg}, RMSE: {RMSE_y_avg}")
         print(f"average cpu time of {STATUS.upper()}: {execution_time} ms")
         print(f"mismatch number of {STATUS.upper()}: {count}")
         #endregion
@@ -155,17 +176,21 @@ def simulate(model, agent=None, sim_num=1, rand_seed=1111, STATUS='EKF', plot_fl
 
 if __name__ == "__main__" : 
     #region 选择执行测试的方法
-    test_options = ["EKF"] # , "UKF", "UKF-MHE", "FIE", "EKF-MHE"
-    #endregion
-    #region 读取保存的轨迹数据
-    model = create_model()
-    trajs = None if dataFile is None else torch.load(f=dataFile)
-    x_batch = None if trajs is None else trajs["x_batch"]
-    y_batch = None if trajs is None else trajs["y_batch"]
-    if y_batch is not None: args.max_sim_steps = y_batch.shape[1]
+    test_options = ["EKF"] # , "UKF", "UKF-MHE", "FIE", "IEKF", "EKF-MHE"
     #endregion
     #region 重定向系统输出以及打印仿真信息
-    logfile = LogFile("output/test_results.txt", rename_option=True)
+    logfile = LogFile("output/test_results.txt", rename_option=False)
+    args = def_param2()
+    model_paras_dict, estimator_paras_dict = set_params(args)
+    model = create_model(**model_paras_dict)
+    trajs = None
+    if dataFile is not None:
+        print(dataFile)
+        with open(file=dataFile, mode="rb") as f:
+            trajs = pickle.load(f)
+    x_batch = None if trajs is None else trajs["x_batch"]
+    y_batch = None if trajs is None else trajs["y_batch"]
+    if y_batch is not None: args.max_sim_steps = len(y_batch[0])
     print(f"sim steps: {args.max_sim_steps}")
     print(f"x0_mu: {model.x0_mu}, x0_hat: {args.x0_hat}")
     print(f"P0_mu: {model.P0}")
@@ -179,16 +204,16 @@ if __name__ == "__main__" :
     #region 测试
     for status in test_options:
         if "MHE" in status.upper():
-            for i in range(1,11):
+            for i in range(1,10):
                 args.window = i
                 print(f"EKF-MHE, window length {args.window}: ")
                 logfile.flush()
-                simulate(model=model, agent=None, sim_num=50, rand_seed=10086, STATUS=status, x_batch=x_batch, y_batch=y_batch, plot_flag=False)
+                simulate(model=model, args=args, agent=None, sim_num=50, rand_seed=10086, STATUS=status, x_batch=x_batch, y_batch=y_batch, plot_flag=False)
                 print("********************")
         else :
             print(f"{status.upper()}:")
             logfile.flush()
-            simulate(model=model, agent=None, sim_num=1, rand_seed=10087, STATUS=status, x_batch=x_batch, y_batch=y_batch, plot_flag=True)
+            simulate(model=model, args=args, agent=None, sim_num=50, rand_seed=10086, STATUS=status, x_batch=x_batch, y_batch=y_batch, plot_flag=False)
             print("********************")
     logfile.flush()
     logfile.endLog()
