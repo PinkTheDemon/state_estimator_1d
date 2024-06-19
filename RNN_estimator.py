@@ -7,7 +7,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 import estimator as est
 from simulate import simulate
 from functions import * # 包括np
-from params import args, EP
+from params import def_param2, set_params
 from model import Model, create_model
 from plot import plotReward
 
@@ -20,7 +20,7 @@ class ActorRNN(nn.Module):
         #region 属性定义以及固定随机数种子(固定网络初始化权重)
         torch.manual_seed(rand_seed)
         self.dim_input = dim_input
-        self.dim_output = dim_output
+        self.dim_output = dim_output-1
         self.num_rnn_layers = num_rnn_layers
         self.dim_rnn_hidden = dim_rnn_hidden
         self.type_activate = type_activate.lower()
@@ -42,14 +42,14 @@ class ActorRNN(nn.Module):
             dim_in = dim_out
         #endregion
         #region RNN层
-        if type_rnn.lower() == 'rnn' : 
-            self.rnn = nn.RNN(input_size=dim_in, hidden_size=dim_rnn_hidden, num_layers=num_rnn_layers, batch_first=batch_first)
-        elif type_rnn.lower() == 'gru' : 
-            self.rnn = nn.GRU(input_size=dim_in, hidden_size=dim_rnn_hidden, num_layers=num_rnn_layers, batch_first=batch_first)
-        elif type_rnn.lower() == 'lstm' : 
-            self.rnn = nn.LSTM(input_size=dim_in, hidden_size=dim_rnn_hidden, num_layers=num_rnn_layers, batch_first=batch_first)
-        else : 
-            raise ValueError("No such RNN type defined")
+        # if type_rnn.lower() == 'rnn' : 
+        #     self.rnn = nn.RNN(input_size=dim_in, hidden_size=dim_rnn_hidden, num_layers=num_rnn_layers, batch_first=batch_first)
+        # elif type_rnn.lower() == 'gru' : 
+        #     self.rnn = nn.GRU(input_size=dim_in, hidden_size=dim_rnn_hidden, num_layers=num_rnn_layers, batch_first=batch_first)
+        # elif type_rnn.lower() == 'lstm' : 
+        #     self.rnn = nn.LSTM(input_size=dim_in, hidden_size=dim_rnn_hidden, num_layers=num_rnn_layers, batch_first=batch_first)
+        # else : 
+        #     raise ValueError("No such RNN type defined")
         #endregion
         #region RNN层之后的全连接层，可以为空列表
         self.fc2 = nn.ModuleList()
@@ -67,7 +67,9 @@ class ActorRNN(nn.Module):
             dim_in = dim_out
         #endregion
         #region 输出层
-        self.fc2.append(nn.Linear(dim_in, dim_output))
+        self.out = nn.ModuleList()
+        self.out.append(nn.Linear(dim_in, self.dim_output)) # L.flatten
+        self.out.append(nn.Linear(dim_in, 1)) # h
         self.weight_init()
         #endregion
     # end function __init__
@@ -84,22 +86,25 @@ class ActorRNN(nn.Module):
         output = input_seq.to(self.device)
         for fc1 in self.fc1 : 
             output = fc1(output)
-        output, hidden = self.rnn(output, hidden)
+        # output, hidden = self.rnn(output, hidden)
         # output = torch.tanh(output) ## rnn内部有tanh激活函数，所以不需要再次加tanh
         for fc2 in self.fc2 : 
             output = fc2(output)
+        outputs = []
+        for fc in self.out :
+            outputs.append(fc(output))
         #endregion
         #region 确保对角线元素为非零 ## 是否需要
-        diag_indices = (0,2,5)
-        output[...,diag_indices] = F.softplus(output[...,diag_indices])
+        diag_indices = (0,2,5,9,14)
+        outputs[0][...,diag_indices] = F.softplus(output[0][...,diag_indices])
         #endregion
         #region 将输出转换成矩阵形式
-        ds = do2ds(self.dim_output)
-        L = torch.zeros((output.shape[:-1])+(ds, ds), device=self.device)
+        ds = do2ds(self.dim_output+1)
+        L = torch.zeros((outputs[0].shape[:-1])+(ds, ds), device=self.device)
         indices = torch.tril_indices(row=ds, col=ds, offset=0) # 获取下三角矩阵的索引
-        L[..., indices[0], indices[1]] = output[..., :-1]
+        L[..., indices[0], indices[1]] = outputs[0]
         P_next_inv = L @ L.permute(*range(L.dim() - 2), -1, -2)
-        h_next = output[..., -1]
+        h_next = outputs[1]
         #endregion
         return P_next_inv, h_next, hidden
     # end function forward
@@ -108,6 +113,9 @@ class ActorRNN(nn.Module):
             if isinstance(fc, nn.Linear) : 
                 nn.init.kaiming_uniform_(fc.weight, mode="fan_in", nonlinearity=self.type_activate)
         for fc in self.fc2 : 
+            if isinstance(fc, nn.Linear) : 
+                nn.init.kaiming_uniform_(fc.weight, mode="fan_in", nonlinearity=self.type_activate)
+        for fc in self.out : 
             if isinstance(fc, nn.Linear) : 
                 nn.init.kaiming_uniform_(fc.weight, mode="fan_in", nonlinearity=self.type_activate)
 
@@ -140,7 +148,7 @@ class RL_estimator():
         self.hidden = None
     # end function reset
     def estimate(self, y, Q, R):
-        result = est.NLSF_uniform(self.P_inv.detach().squeeze().cpu().numpy(), y_seq=[y], Q=Q, R=R, mode="quadratic", x0=[self.x_hat], x0_bar=self.x_hat)
+        result = est.NLSF_uniform(self.P_inv.detach().squeeze().cpu().numpy().reshape((self.dim_state,-1)), y_seq=[y], Q=Q, R=R, mode="quadratic", x0=[self.x_hat], x0_bar=self.x_hat)
         self.status = result.status
         input = np.tile(np.hstack((self.x_hat, y)), (1,1,1))
         input = torch.from_numpy(input).float().to(self.device)
@@ -150,7 +158,7 @@ class RL_estimator():
     # end function estimate
     def value(self, x, x_bar, P_inv, h=None):
         x = torch.Tensor((x - x_bar)).unsqueeze(0)
-        Q = x @ P_inv.squeeze() @ x.T
+        Q = x @ P_inv.squeeze().reshape((self.dim_state,-1)) @ x.T
         if h is not None:Q += h.squeeze()
         return Q
     # end function value
@@ -177,7 +185,7 @@ def train(model:Model, agent:RL_estimator, args) -> None:
     #endregion
     for i in range(args.max_episodes) : 
         #region 生成真实轨迹
-        x_seq, y_seq = model.generate_data(maxsteps=args.max_train_steps, randSeed=i)
+        x_seq, y_seq = model.generate_data(args.max_train_steps, is_mismatch=args.MODEL_MISMATCH, rand_seed=i)
         #endregion
         #region 状态估计
         agent.reset(args.x0_hat, args.P0_hat)
@@ -195,7 +203,7 @@ def train(model:Model, agent:RL_estimator, args) -> None:
             #region 求解窗口长度为1的非线性最小二乘，得到 x_next_hat
             x_next_hat, P_inv_next, h_next = agent.estimate(y_seq[t], model.Q, model.R)
             x_hat_seq.append(x_next_hat)
-            P_inv_seq.append(P_inv_next.detach().squeeze().cpu().numpy())
+            P_inv_seq.append(P_inv_next.detach().squeeze().cpu().numpy().reshape((agent.dim_state,-1)))
             #endregion
             #region 计算targetQ和Q
             targetQ_list = []
@@ -261,6 +269,7 @@ def train(model:Model, agent:RL_estimator, args) -> None:
 
 def main():
     #region 加载相关参数
+    args = def_param2()
     args.aver_num = 10 # 有提升但提升不大，或许最后可以靠这个提高一点点性能
     args.train_window = 1
     args.max_episodes = 1000
@@ -270,17 +279,18 @@ def main():
     args.modelend_file = checkFilename("output/modelend.mdl")
     args.rename_option = True
     args.STATUS = "RLF-MHE"
-    args.hidden_layer = ([256,256,256,256], 256, [256])
+    args.hidden_layer = ([256], 256, [256])
     print("simulate method: ", args.STATUS)
     print("hidden_layer: ", args.hidden_layer)
-    model = create_model()
-    agent = RL_estimator(**EP._asdict())
+    model_paras_dict, estimator_paras_dict = set_params(args=args)
+    model = create_model(**model_paras_dict)
+    agent = RL_estimator(**estimator_paras_dict)
     #endregion
     #region 策略网络初始化 
-    # optimizer = Adam(agent.policy.parameters(), lr=1e-2)
+    # optimizer = Adam(agent.policy.parameters(), lr=5e-2)
     # scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=50, factor=0.5, min_lr=1e-6, verbose=True)
     # count = 0
-    # for i in range(2000) : 
+    # for i in range(1000) : 
     #     x_hat_seq, y_seq, P_hat_seq = simulate(model, args, rand_seed=22222+i, STATUS='init')
     #     x_hat_seq = np.insert(x_hat_seq, 0, args.x0_hat, axis=0)
     #     P_hat_seq = np.insert(P_hat_seq, 0, args.P0_hat, axis=0)
@@ -297,16 +307,18 @@ def main():
     #     loss = F.mse_loss(Pinv_seq, target_Pinv_seq)+F.mse_loss(h_seq, target_h_seq)
     #     optimizer.zero_grad(set_to_none=True)
     #     loss.backward()
-    #     # grad_clipping(agent.policy, 10)
+    #     grad_clipping(agent.policy, 10)
     #     optimizer.step()
     #     scheduler.step(loss)
     #     print(f"train time: {i}, loss: {loss}")
-    #     if loss < 1e-3 : 
+    #     if loss < 1e-4 : 
     #         count += 1
     #     else : 
     #         count = 0
     #     if count >= 5 : 
     #         break
+    # agent.save_model("output/modelpre(256_64_256).mdl")
+    # agent.load_model("output/modelpre(256_64_256).mdl")
     #endregion
     #region 模型训练
     if 'RLF' in args.STATUS : train(model, agent, args)

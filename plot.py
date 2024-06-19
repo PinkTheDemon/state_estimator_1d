@@ -7,16 +7,16 @@ from functions import checkFilename
 def plotReward(rewardSeq, filename=None) -> None : 
     tSeq = range(len(rewardSeq))
     smoothedReward = [rewardSeq[0]]
-    alpha = 0.4
+    alpha = 1
     for i in range(1, len(rewardSeq)) : 
         # # 指数平滑
-        # smoothedValue = alpha*rewardSeq[i] + (1-alpha)*smoothedReward[i-1]
-        # smoothedReward.append(smoothedValue)
+        smoothedValue = alpha*rewardSeq[i] + (1-alpha)*smoothedReward[i-1]
+        smoothedReward.append(smoothedValue)
         # # ----------
         # 滑动窗口
-        windowLength = 50
-        if i < windowLength : smoothedReward.append(sum(rewardSeq[:i+1])/(i+1))
-        else : smoothedReward.append(sum(rewardSeq[i-windowLength+1:i+1])/windowLength)
+        # windowLength = 50
+        # if i < windowLength : smoothedReward.append(sum(rewardSeq[:i+1])/(i+1))
+        # else : smoothedReward.append(sum(rewardSeq[i-windowLength+1:i+1])/windowLength)
         # ----------
     plt.figure()
     plt.plot(tSeq, smoothedReward)
@@ -29,7 +29,7 @@ def plotReward(rewardSeq, filename=None) -> None :
 
 
 def plotTrajectory(x_seq, x_hat_seq, STATUS="None") -> None:
-    ds = x_seq.shape[-1]
+    ds = x_seq[0].size
     max_steps = len(x_seq)
     t_seq = range(max_steps)
     error = np.abs(x_seq - x_hat_seq)

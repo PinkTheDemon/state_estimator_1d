@@ -1,59 +1,100 @@
 import numpy as np
-import torch
 from scipy.optimize import least_squares
 from scipy.stats import multivariate_normal
 
-from functions import block_diag, inv, delete_empty
-from params import GP
+from functions import block_diag, inv, delete_empty, isConverge
 import dynamics as dyn
 
-# Extended Kalman Filter
-# class Estimator :
-#     def __init__(self, f_fn, h_fn, Q, R, x0_hat, P0_hat) -> None:
-#         self.f_fn = f_fn
-#         self.h_fn = h_fn
-#         self.Q = Q
-#         self.R = R
-#         self.xt_hat = torch.tensor(x0_hat, dtype=torch.float32, device=GP.device)
-#         self.Pt_hat = torch.tensor(P0_hat, dtype=torch.float32, device=GP.device)
-#     def predict(self):
-#         pass
-#     def update(self, yt_p1):
-#         pass
-#     def estimate(self, yt_p1):
-#         self.predict()
-#         self.update(yt_p1=yt_p1)
+# calculate (P^-1)*
+def cal_Poptim(A:np.ndarray, C:np.ndarray, Q:np.ndarray, R:np.ndarray, B=None, gamma=1.0, tol=1e-4) -> np.ndarray:
+    # P0 = np.ones_like(a=A)
+    P0 = np.eye(A.shape[0])
+    if B is None :
+        B = -np.eye(A.shape[0])
+    # else :
+    #     P0 = block_diag((P0, P0))
+    P_list = [P0]
+    while True:
+        P = P_list[-1]
+        P = C.T@inv(R)@C + gamma*A.T@P@A - gamma**2*A.T@P@B@inv(inv(Q) + gamma*B.T@P@B)@B.T@P@A
+        P_list.append(P)
+        if len(P_list) >= 5:
+            del P_list[0]
+            if isConverge(matrices=P_list, criterion=np.linalg.norm, tol=tol, ord="fro"):
+                break
+    return P_list[-1]
 
-# class EKF(Estimator):
-#     def __init__(self, f_fn, h_fn, Q, R, x0_hat, P0_hat) -> None:
-#         super().__init__(f_fn, h_fn, Q, R, x0_hat, P0_hat)
-    
-#     def predict(self):
-#         self.xt_p1_pre = self.f_fn(self.xt_hat)
-#         self.xt_p1_pre.backward()
-#         F = self.xt_hat.grad()
-#         self.Pt_p1_pre = F @ self.Pt_hat @ F.T
-#         if self.Q.size != 0 : self.Pt_p1_pre = self.Pt_p1_pre + self.Q
-    
-#     def update(self, yt_p1):
-#         yt_p1_pre = 
-#         pass
+# Extended Kalman Filter
 def EKF (x, P, y_next, Q, R) : 
     # linearization system matrix 1 #####################
-    F = dyn.F_fn(x)
+    F = dyn.F(x)
     # ###################################################
 
     # predict
     P_pre = F @ P @ F.T
     if Q.size != 0 : P_pre = P_pre + Q
-    x_pre = dyn.f_fn(x)
+    x_pre, y_pre = dyn.step(x)
     # update
-    y_pre = dyn.h_fn(x_pre)
-    H = dyn.H_fn(x_pre)
-    P_hat = inv(inv(P_pre) + H.T@inv(R)@H)
+    H = dyn.H(x_pre)
+    # P_hat = inv(inv(P_pre) + H.T@inv(R)@H)
+    P_hat = P_pre - P_pre@H.T@inv(R+H@P_pre@H.T)@H@P_pre
     x_hat = x_pre - (P_hat@H.T@inv(R)@(y_pre - y_next).T).T
+    x_hat = np.squeeze(x_hat)
+    #region 能观性矩阵
+    O = np.vstack((H))#, H@F, H@F@F
+    if np.linalg.matrix_rank(O) < 1:
+        raise ValueError("不可观")
+    #endregion
+    return x_hat, P_hat
 
-    return x_hat.reshape((-1,)), P_hat
+class EKF_class:
+    def __init__(self, f_fn, h_fn, F_fn, H_fn, dim_state, dim_obs, x0=None, P0=None) -> None:
+        self.f_fn = f_fn
+        self.h_fn = h_fn
+        self.F_fn = F_fn
+        self.H_fn = H_fn
+        self.dim_state = dim_state
+        self.dim_obs = dim_obs
+        if x0 is not None and P0 is not None:
+            self.reset(x0=x0, P0=P0)
+
+    def reset(self, x0, P0):
+        self.x_hat = x0
+        self.P_hat = P0
+    
+    def predict(self, Q, u=None):
+        F = self.F_fn(x=self.x_hat, u=u)
+        self.x_hat = self.f_fn(x=self.x_hat, u=u)
+        self.P_hat = F@self.P_hat@F.T
+        if Q.size != 0 : self.P_hat += Q
+
+    def update(self, y, R):
+        y_pre = self.h_fn(x=self.x_hat)
+        H = self.H_fn(x=self.x_hat)
+        self.P_hat = self.P_hat - self.P_hat@H.T@inv(R+H@self.P_hat@H.T)@H@self.P_hat
+        self.x_hat = self.x_hat - (self.P_hat@H.T@inv(R)@(y_pre - y).T).T
+        self.x_hat = self.x_hat.squeeze()
+
+    def estimate(self, y, Q, R, u=None):
+        self.predict(Q=Q, u=u)
+        self.update(y=y, R=R)
+
+def IEKF(x, P, y_next, Q, R, times=10):
+    # predict
+    F = dyn.F(x)
+    P_pre = F @ P @ F.T
+    if Q.size != 0 : P_pre = P_pre + Q
+    x_pre0 = dyn.f(x)
+    x_pre = x_pre0
+    # update
+    for _ in range(times):
+        H = dyn.H(x=x_pre)
+        y_pre = dyn.h(x=x_pre)
+        P_hat = inv(inv(P_pre) + H.T@inv(R)@H)
+        x_hat = x_pre0 - (P_hat@H.T@inv(R)@(y_pre - y_next).T).T
+        x_hat = np.squeeze(x_hat)
+        x_pre = x_hat
+    return x_hat, P_hat
 
 # Unscented Kalman Filter
 def UKF(state, P, obs_next, Q, R, alpha=.5, beta=2., kappa=-5.) : 
@@ -79,7 +120,7 @@ def UKF(state, P, obs_next, Q, R, alpha=.5, beta=2., kappa=-5.) :
     Wm[0] = lamda / (na + lamda)
 
     # time update
-    x_next_pre = dyn.f_fn(xx_sigma)
+    x_next_pre = dyn.f(xx_sigma)
     x_next_pre_aver = np.average(x_next_pre, weights=Wm, axis=0)
     P_next_pre = np.zeros((n,n))
     for i in range(2*na+1) : 
@@ -98,7 +139,7 @@ def UKF(state, P, obs_next, Q, R, alpha=.5, beta=2., kappa=-5.) :
     xv_sigma = xa_sigma[:,n+nw: ]
 
     # measurement update ## 有一种是直接用上面的sigma点做y的预测的，还有一种是用上面算出来的x_pre_aver和P_pre重新选择sigma点做y预测的，下面先采用前者简单方式
-    y_next_pre = dyn.h_fn(xx_sigma)
+    y_next_pre = dyn.h(xx_sigma)
     y_next_pre_aver = np.average(y_next_pre, weights=Wm, axis=0)
     P_yy = np.zeros_like(R)
     P_xy = np.zeros((n, nv))
@@ -120,16 +161,17 @@ def NLSF_uniform(P_inv, y_seq, Q, R, mode:str="quadratic", x0=None, **args) :
     elif "quadratic" in mode.lower() : 
         fun = Quadratic()
         params = [P_inv, y_seq, Q, R, args["x0_bar"]]
-    
+
+    if "gamma" in args.keys() : params.append(args["gamma"])
     if "end" in mode.lower() : params.append(args["xend"])
 
     ds = Q.shape[0]
     if x0 is None : 
-        x0 = torch.zeros((ds*(len(y_seq)+1), ))
+        x0 = np.zeros((ds*(len(y_seq)+1), ))
     else : 
         while (len(x0) <= len(y_seq)) : 
-            x0.append(dyn.f_fn(x0[-1]))
-        x0 = torch.stack(x0).reshape((-ds,))
+            x0.append(dyn.f(x0[-1]))
+        x0 = np.array(x0).reshape(-1)
     result = least_squares(fun.res_fun, x0, method='lm', jac=fun.jac_fun, args=params) # , max_nfev=8
     return result
 
@@ -137,29 +179,29 @@ class SumOfSquares() :
     def __init__(self) -> None:
         pass
 
-    def res_fun(self, x, LP, y_seq, Q, R, xend=None) : 
+    def res_fun(self, x, LP, y_seq, Q, R, gamma=1.0, xend=None) : 
         num_obs = len(y_seq)
-        ds = int(x.shape[0] / (num_obs+1))
+        ds = int(x.size / (num_obs+1))
 
-        LQ = torch.linalg.cholesky(inv(Q))
-        LR = torch.linalg.cholesky(inv(R))
+        LQ = np.linalg.cholesky(inv(Q))
+        LR = np.linalg.cholesky(inv(R))
         f = np.insert(x[:ds], 0, 1)[np.newaxis,:]
         L = LP[:]
         for i in range(num_obs) : 
-            f = torch.hstack((f, x[ds*(i+1):ds*(i+2)]-dyn.f_fn(x[ds*(i):ds*(i+1)])[np.newaxis,:], 
-                              y_seq[i]-dyn.h_fn(x[ds*(i+1):ds*(i+2)])[np.newaxis,:]))
+            f = np.hstack((f, x[ds*(i+1):ds*(i+2)]-dyn.f(x[ds*(i):ds*(i+1)])[np.newaxis,:], 
+                              y_seq[i]-dyn.h(x[ds*(i+1):ds*(i+2)])[np.newaxis,:]))
             L = block_diag((L, LQ, LR))
         
         if xend is not None : 
-            f = np.hstack((f, (xend-dyn.f_fn(x[-ds:]))[np.newaxis,:]))
+            f = np.hstack((f, (xend-dyn.f(x[-ds:]))[np.newaxis,:]))
             L = block_diag((L, LQ))
         
         return (f@L).reshape(-1)
 
-    def jac_fun(self, x, LP, y_seq, Q, R, xend=None) : 
+    def jac_fun(self, x, LP, y_seq, Q, R, gamma=1.0, xend=None) : 
         num_obs = len(y_seq)
         ds = int(x.size / (num_obs+1))
-        jadd = lambda x0, x1 : np.vstack((np.hstack((-dyn.F_fn(x0), np.eye(ds))), np.pad(-dyn.H_fn(x1), ((0,0),(ds,0)))))
+        jadd = lambda x0, x1 : np.vstack((np.hstack((-dyn.F(x0), np.eye(ds))), np.pad(-dyn.H(x1), ((0,0),(ds,0)))))
 
         LQ = np.linalg.cholesky(inv(Q))
         LR = np.linalg.cholesky(inv(R))
@@ -172,7 +214,7 @@ class SumOfSquares() :
             L = block_diag((L, LQ, LR))
 
         if xend is not None : 
-            Jadd = np.pad(-dyn.F_fn(xend), ((0,0),(ds*num_obs,0)))
+            Jadd = np.pad(-dyn.F(xend), ((0,0),(ds*num_obs,0)))
             J = np.vstack((J, Jadd))
             L = block_diag((L, LQ))
 
@@ -182,43 +224,43 @@ class Quadratic() :
     def __init__(self) -> None:
         pass
 
-    def res_fun(self, x, P_inv, y_seq, Q, R, x0_bar, xend=None) : 
+    def res_fun(self, x, P_inv, y_seq, Q, R, x0_bar, gamma=1.0, xend=None) : 
         num_obs = len(y_seq)
-        ds = int(x.shape[0] / (num_obs+1))
+        ds = x.size // (num_obs+1)
 
         f = np.tile(np.array(x[:ds] - x0_bar), (1,1))
-        M = P_inv[:]
+        M = np.copy(P_inv) * gamma
         for i in range(num_obs) : 
-            f = np.hstack((f, x[ds*(i+1):ds*(i+2)]-dyn.f_fn(x[ds*(i):ds*(i+1)])[np.newaxis,:], 
-                              y_seq[i]-dyn.h_fn(x[ds*(i+1):ds*(i+2)])[np.newaxis,:]))
+            f = np.hstack((f, x[ds*(i+1):ds*(i+2)]-dyn.f(x[ds*(i):ds*(i+1)])[np.newaxis,:], 
+                              y_seq[i]-dyn.h(x[ds*(i+1):ds*(i+2)])[np.newaxis,:]))
             M = block_diag((M, inv(Q), inv(R)))
         
         if xend is not None : 
-            f = np.hstack((f, (xend-dyn.f_fn(x[-ds:]))[np.newaxis,:]))
+            f = np.hstack((f, (xend-dyn.f(x[-ds:]))[np.newaxis,:]))
             M = block_diag((M, inv(Q)))
         
         L = np.linalg.cholesky(M)
         return (f@L).reshape(-1)
 
-    def jac_fun(self, x, P_inv, y_seq, Q, R, x0_bar, xend=None) : 
+    def jac_fun(self, x, P_inv, y_seq, Q, R, x0_bar, gamma=1.0, xend=None) : 
         num_obs = len(y_seq)
         ds = int(x.size / (num_obs+1))
-        jadd = lambda x0, x1 : torch.vstack((torch.hstack((-dyn.F_fn(x0), torch.eye(ds))), torch.nn.functional.pad(-dyn.H_fn(x1), ((0,0),(ds,0)))))
+        jadd = lambda x0, x1 : np.vstack((np.hstack((-dyn.F(x0), np.eye(ds))), np.pad(-dyn.H(x1), ((0,0),(ds,0)))))
 
-        J = torch.eye(ds)
-        M = P_inv[:]
+        J = np.eye(ds)
+        M = P_inv[:] * gamma
         for i in range(num_obs) : 
-            J = torch.nn.functional.pad(J, ((0,0), (0,ds)))
-            Jadd = torch.nn.functional.pad(jadd(x[ds*i:ds*(i+1)], x[ds*(i+1):ds*(i+2)]), ((0,0), (i*ds,0)))
-            J = torch.vstack((J, Jadd))
+            J = np.pad(J, ((0,0), (0,ds)))
+            Jadd = np.pad(jadd(x[ds*i:ds*(i+1)], x[ds*(i+1):ds*(i+2)]), ((0,0), (i*ds,0)))
+            J = np.vstack((J, Jadd))
             M = block_diag((M, inv(Q), inv(R)))
 
         if xend is not None : 
-            Jadd = torch.nn.functional.pad(-dyn.F_fn(xend), ((0,0),(ds*num_obs,0)))
-            J = torch.vstack((J, Jadd))
+            Jadd = np.pad(-dyn.F(xend), ((0,0),(ds*num_obs,0)))
+            J = np.vstack((J, Jadd))
             M = block_diag((M, inv(Q)))
 
-        L = torch.linalg.cholesky(M).T
+        L = np.linalg.cholesky(M).T
         return L@J
 
 

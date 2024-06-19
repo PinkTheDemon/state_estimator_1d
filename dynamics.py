@@ -1,71 +1,268 @@
-import torch
+import numpy as np
 from scipy.integrate import solve_ivp
 
-from params import GP, MP
 
-#region RK45 for solving CDE
-def rk45(func, t0, y0, t_end, h, isGrad):
-    t = t0
-    y = y0.clone().detach().requires_grad_(isGrad)
-    while t < t_end:
-        k1 = h * func(t, y)
-        k2 = h * func(t + 0.25 * h, y + 0.25 * k1)
-        k3 = h * func(t + 3/8 * h, y + 3/32 * k1 + 9/32 * k2)
-        k4 = h * func(t + 12/13 * h, y + 1932/2197 * k1 - 7200/2197 * k2 + 7296/2197 * k3)
-        k5 = h * func(t + h, y + 439/216 * k1 - 8 * k2 + 3680/513 * k3 - 845/4104 * k4)
-        k6 = h * func(t + 0.5 * h, y - 8/27 * k1 + 2 * k2 - 3544/2565 * k3 + 1859/4104 * k4 - 11/40 * k5)
-        
-        y_next = y + 25/216 * k1 + 1408/2565 * k3 + 2197/4104 * k4 - 0.2 * k5
-        y_error = 1/360 * k1 - 128/4275 * k3 - 2197/75240 * k4 + 1/50 * k5 + 2/55 * k6
-        
-        t += h
-        y = y_next
+def f(x, u=None, disturb=None, sample_time=0.1, batch_first:bool=True) : 
+
+    # disceret form
+    if batch_first is True : x = x.T
+    x_next = np.zeros_like(x)
+    # dynamics 1 #########################################
+    # x_next[0] = x[0] + sample_time*x[1]
+    # x_next[1] = x[1]
+    # x_next[2] = x[2] + sample_time*x[3]
+    # x_next[3] = x[3]
+    # x_next[4] = x[4]
+    # ####################################################
+    # dynamics 2 #########################################
+    x_next[0] = 0.95*x[0] + 0.1*x[1]
+    x_next[1] = -0.98*x[0] + 0.94*x[1]
+    # ####################################################
+    x = x_next
+    if batch_first is True : x = x.T
+
+    # continuous form
+    # xdot = lambda t, y : ( np.array([
+    #     # dynamics 3 #####################################
+    #     # -x[1],
+    #     # -0.2*(1-x[0]**2)*x[1] + x[0]
+    #     # ################################################
+    #     # dynamics 4:Lorenz attractor ####################
+    #     # 10*(-y[0]+y[1]),
+    #     # 28*y[0] - y[1] - y[0]*y[2],
+    #     # -8/3*y[2] + y[0]*y[1]
+    #     # ###############################################
+    #     # dynamics 5 ####################################
+    #     -x**3
+    #     # ###############################################
+    #     ]) )
+    # if x.ndim == 1 : 
+    #     x = solve_ivp(xdot, [0,0+sample_time], x).y.T[-1]
+    #     # x = x + xdot(0,x).reshape((-1,))*sample_time
+    # elif x.ndim == 2 : 
+    #     x_next = np.array([]).reshape(0, x[0].size)
+    #     for y in x : 
+    #         x_next = np.append(x_next, [solve_ivp(xdot, [0,0+sample_time], y).y.T[-1]], axis=0)
+    #     x = x_next
+
+    if disturb is not None : x = x + disturb
+    return x
+
+def F(x, u=None, sample_time=0.1) : 
+    # jac 1 ##############################################
+    # F = np.array([[1, sample_time, 0, 0, 0], 
+    #               [0, 1, 0, 0, 0],
+    #               [0, 0, 1, sample_time, 0],
+    #               [0, 0, 0, 1, 0],
+    #               [0, 0, 0, 0, 1]])
+    # ####################################################
+    # jac 2 ##############################################
+    F = np.array([[0.95 , 0.10], 
+                  [-0.98, 0.94]])
+    # ####################################################
+    # jac 3 ##############################################
+    # F = np.eye(x.size) + sample_time * \
+    #     np.array([[0, -1], 
+    #               [0.4*x[0]*x[1]+1, 0.2*(x[0]**2-1)]])
+    # ####################################################
+    # jac 4 ##############################################
+    # F = np.eye(x.size) + sample_time * \
+    #     np.array([[-10    , 10  , 0    ], 
+    #               [28-x[2], -1  , -x[0]],
+    #               [x[1]   , x[0], -8/3 ]])
+    # ####################################################
+    # jac 5 ##############################################
+    # F = np.eye(x.size) + sample_time * \
+    #     np.array([-3*x**2]).reshape((1,1))
+    # ####################################################
+    return F
+
+def f_real(x, u=None, disturb=None, sample_time=0.1, batch_first:bool=True) : 
+    # disceret form
+    if batch_first is True : x = x.T
+    x_next = np.zeros_like(x)
+    # dynamics 1 #########################################
+    # x_next[0] = x[0] + sample_time*x[1]
+    # x_next[1] = 0.8*x[1]
+    # x_next[2] = x[2] + sample_time*x[3]
+    # x_next[3] = 0.75*x[3]
+    # x_next[4] = x[4]
+    # ####################################################
+    # dynamics 2 #########################################
+    x_next[0] = 0.65*x[0] + 0.4*x[1]
+    x_next[1] = -0.78*x[0] + 0.74*x[1]
+    # ####################################################
+    x = x_next
+    if batch_first is True : x = x.T
+    if disturb is not None : x = x + disturb
+    return x
+
+def F_real(x, u=None, sample_time=0.1) : 
+    # dynamics 1 #########################################
+    # F = np.array([[1, sample_time, 0, 0, 0], 
+    #               [0, 0.8, 0, 0, 0],
+    #               [0, 0, 1, sample_time, 0],
+    #               [0, 0, 0, 0.75, 0],
+    #               [0, 0, 0, 0, 1]])
+    # ####################################################
+    # dynamics 2 #########################################
+    F = np.array([[0.65 , 0.40], 
+                  [-0.78, 0.74]])
+    # ####################################################
+    return F
+
+def h(x, noise=None, batch_first:bool=True) : 
+    if batch_first is True : x = x.T
+    # measurement equation 1 #############################
+    # y = np.array([x[0], x[2], x[4]])
+    # ####################################################
+    # measurement equation 2 #############################
+    y = np.array([x[1]])
+    # ####################################################
+    # measurement equation 4 #############################
+    # y = np.array([np.sqrt(x[0]**2+x[1]**2+x[2]**2), x[0]])
+    # ####################################################
+    # measurement equation 5 #############################
+    # y = np.array([x**2+x]).reshape((1,))
+    # ####################################################
+    if batch_first is True : y = y.T
+    if noise is not None : y = y + noise
     return y
 
+def H(x) : 
+    # jac 1 #############################################
+    # H = np.array([[1, 0, 0, 0, 0],
+    #               [0, 0, 1, 0, 0],
+    #               [0, 0, 0, 0, 1]])
+    # ###################################################
+    # jac 2 #############################################
+    H = np.array([[0,1]])
+    # ###################################################
+    # jac 4 #############################################
+    # y = np.linalg.norm(x)
+    # H = np.array([[x[0]/y, x[1]/y, x[2]/y], [1,0,0]])
+    # ###################################################
+    # jac 5 #############################################
+    # H = np.array([2*x+1]).reshape((1,1))
+    # ###################################################
+    return H
+
+def h_real(x, noise=None, batch_first:bool=True) : 
+    if batch_first is True : x = x.T
+    # measurement equation 1 #############################
+    # y = np.array([x[0], x[2], x[4]])
+    # ####################################################
+    # measurement equation 2 #############################
+    y = np.array([x[1]])
+    # ####################################################
+    if batch_first is True : y = y.T
+    if noise is not None : y = y + noise
+    return y
+
+def H_real(x) : 
+    # jac 1 #############################################
+    # H = np.array([[1, 0, 0, 0, 0],
+    #               [0, 0, 1, 0, 0],
+    #               [0, 0, 0, 0, 1]])
+    # ###################################################
+    # jac 2 #############################################
+    H = np.array([[0,1]])
+    # ###################################################
+    return H
 
 # system dynamics
-def f_fn(xt :torch.float32, dt :float =None, ut :torch.float32 =None, wt :torch.float32 =None, isGrad :bool =False) -> torch.float32:
-    if dt is None : 
-        dt = MP.dt
-    if ut is None :
-        ut = u_fn(xt=xt)
-    dx_dt = lambda t, y : (
-            torch.FloatTensor([
-                -xt**3
-            ], device=GP.device)
-            )
-    xt_p1 = rk45(dx_dt, t0=0, y0=xt, t_end=dt, h=dt, isGrad=isGrad)
-    if wt is not None: 
-        xt_p1 += wt
-    return xt_p1
-# dynamics linearization
-def F_fn(xt :torch.float32, dt :float =None, ut :torch.float32 =None) -> torch.float32:
-    if dt is None : 
-        dt = MP.dt
-    if ut is None :
-        ut = u_fn(xt=xt)
-    F = torch.eye(xt.shape[0]) + dt* \
-        torch.FloatTensor([
-            [-3*xt**2]
-        ], device=GP.device)
-    return F
-# controller
-def u_fn(xt :torch.float32) -> torch.float32:
-    ut = torch.FloatTensor([
-        0
-    ], device=GP.device)
-    return ut
-# observation
-def h_fn(xt :torch.float32, vt :torch.float32 =None) -> torch.float32:
-    yt = torch.FloatTensor([
-            xt**2+xt
-        ], device=GP.device)
-    if vt is not None:
-        yt += vt
-    return yt
-# observation linearization
-def H_fn(xt :torch.float32) -> torch.float32:
-    H = torch.FloatTensor([
-        [2*xt+1]
-    ], device=GP.device)
-    return H
+def step(x, u=None, disturb=None, noise=None) : 
+    x_next = f(x, u=u, disturb=disturb)
+    y_next = h(x_next, noise)
+    return x_next, y_next
+
+
+# generate noise list for ith simulation
+def reset(sim_num, maxstep, x0_mu, P0, disturb_Q, noise_R, 
+          disturb_mu=None, noise_mu=None) : 
+    np.random.seed(sim_num)
+    
+    if P0.size == 0 : 
+        initial_state = x0_mu
+    else :
+        initial_state = x0_mu + (np.random.multivariate_normal(np.zeros_like(x0_mu), P0))
+
+    if disturb_mu is None : 
+        disturb_mu = np.zeros(disturb_Q.shape[0])
+    if noise_mu is None : 
+        noise_mu = np.zeros(noise_R.shape[0])
+
+    if disturb_Q.size == 0 : 
+        disturb_list = np.zeros((maxstep, disturb_mu.size))
+    else : 
+        disturb_list = np.random.multivariate_normal(disturb_mu, disturb_Q, maxstep)
+    if noise_R.size == 0 : 
+        noise_list = np.zeros((maxstep, noise_mu.size))
+    else : 
+        noise_list = np.random.multivariate_normal(noise_mu, noise_R, maxstep)
+
+    return initial_state, disturb_list, noise_list
+
+
+'''
+f
+状态方程 微分方程通过RK45方法数值求解
+--------------------------------------------------
+输入           含义        数据类型    取值范围    说明
+x              状态        ndarray     --          无
+#u             控制        ndarray     --          默认无控制
+disturb        扰动        ndarray     --          默认无扰动
+time_sample    采样时间    float       >0          默认为0.01 连续形式的状态方程对应的采样时间
+                                                   内部进行离散化的时间单元是1e-3 这个参数只是外部采样间隔 不影响方程离散化计算的精度
+batch_first    批量优先    bool        bool        默认值True 指定x的格式是否为批量优先 一般的批量数据的形状都是批量优先 方便索引
+--------------------------------------------------
+输出    含义    数据类型    取值范围    说明
+x       输出    ndarray     --          无
+'''
+
+'''
+h
+观测方程
+--------------------------------------------------
+输入           含义        数据类型    取值范围    说明
+x              状态        ndarray     --          无
+noise          噪声        ndarray     --          默认无噪声
+batch_first    批量优先    bool        bool        默认值True 指定x的格式是否为批量优先 一般的批量数据的形状都是批量优先 方便索引
+--------------------------------------------------
+输出    含义    数据类型    取值范围    说明
+y       观测    ndarray     --          无
+'''
+
+'''
+step
+步进函数 整合f和h
+--------------------------------------------------
+输入       含义    数据类型    取值范围    说明
+x          状态    ndarray     --          无
+disturb    扰动    ndarray     --          无
+noise      噪声    ndarray     --          无
+--------------------------------------------------
+输出      含义    数据类型    取值范围    说明
+x_next    状态    ndarray     --          无
+y_next    观测    ndarray     --          无
+'''
+
+'''
+reset
+初始化函数 生成随机初始状态以及噪声序列
+--------------------------------------------------
+输入          含义              数据类型    取值范围    说明
+rand_num      随机数种子号      int         >=0         可以用仿真序号作为随机数种子输入
+maxstep       仿真步长          int         >0          生成对应长度的噪声序列
+x0_mu         初始状态均值      ndarray     --          仅用于生成仿真实验中的不同初始状态 不用于估计问题
+P0            初始状态协方差    ndarray     --          为空集时 初始状态不随机 确定为均值
+disturb_Q     扰动协方差        ndarray     --          方差为0对应生成全0的扰动
+noise_R       噪声协方差        ndarray     --          方差为0对应生成全0的噪声
+disturb_mu    扰动均值          ndarray     --          默认0
+noise_mu      噪声均值          ndarray     --          默认0
+--------------------------------------------------
+输出             含义        数据类型    取值范围    说明
+initial_state    初始状态    ndarray     --          无
+disturb_list     扰动序列    ndarray     --          无
+noise_list       噪声序列    ndarray     --          无
+'''
