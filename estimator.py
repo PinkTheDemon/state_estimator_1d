@@ -73,7 +73,6 @@ class EKF_class:
         H = self.H_fn(x=self.x_hat)
         self.P_hat = self.P_hat - self.P_hat@H.T@inv(R+H@self.P_hat@H.T)@H@self.P_hat
         self.x_hat = self.x_hat - (self.P_hat@H.T@inv(R)@(y_pre - y).T).T
-        self.x_hat = self.x_hat.squeeze()
 
     def estimate(self, y, Q, R, u=None):
         self.predict(Q=Q, u=u)
