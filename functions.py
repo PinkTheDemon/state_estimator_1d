@@ -181,11 +181,15 @@ def vec2mat(vec:np.array, m=None, n=None) -> np.array:
     '''
     # 判断需要的是胖矩阵还是瘦矩阵
     transpose = False
-    if m > n :
-        transpose = True
-        m = m + n
-        n = m - n
-        m = m - n
+    if m is None:
+        m = do2ds(vec.size)
+        n = m
+    else :
+        if m > n :
+            transpose = True
+            m = m + n
+            n = m - n
+            m = m - n
     # 取上三角矩阵的前m行索引号
     indices = np.triu_indices(n)
     indices0 = indices[0][indices[0] < m]
