@@ -38,8 +38,7 @@ def EKF (x, P, y_next, Q, R) :
     H = dyn.H(x_pre)
     # P_hat = inv(inv(P_pre) + H.T@inv(R)@H)
     P_hat = P_pre - P_pre@H.T@inv(R+H@P_pre@H.T)@H@P_pre
-    x_hat = x_pre - (P_hat@H.T@inv(R)@(y_pre - y_next).T).T
-    x_hat = np.squeeze(x_hat)
+    x_hat = x_pre - P_hat@H.T@inv(R)@(y_pre - y_next)
     #region 能观性矩阵
     O = np.vstack((H))#, H@F, H@F@F
     if np.linalg.matrix_rank(O) < 1:
@@ -72,7 +71,7 @@ class EKF_class:
         y_pre = self.h_fn(x=self.x_hat)
         H = self.H_fn(x=self.x_hat)
         self.P_hat = self.P_hat - self.P_hat@H.T@inv(R+H@self.P_hat@H.T)@H@self.P_hat
-        self.x_hat = self.x_hat - (self.P_hat@H.T@inv(R)@(y_pre - y).T).T
+        self.x_hat = self.x_hat - self.P_hat@H.T@inv(R)@(y_pre - y)
 
     def estimate(self, y, Q, R, u=None):
         self.predict(Q=Q, u=u)
