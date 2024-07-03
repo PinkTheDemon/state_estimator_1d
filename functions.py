@@ -1,4 +1,5 @@
 import numpy as np
+import copy
 import sys
 import os
 
@@ -153,29 +154,64 @@ class RandomGenerator :
 def vectorize(M:np.array) -> np.array:
     '''
     对称矩阵化为向量,矩阵维度为n*n,向量长度为n(n+1)/2
+    矩阵维度为m*n,记a=min(m,n),向量长度为m*n-a(a-1)/2
+    不会影响M的值
     '''
-    vec = None
-    for i in range(M.shape[0]):
-        if vec is None :
-            vec = np.copy(M[i,:i+1])
-        else :
-            vec = np.concatenate((vec, M[i,:i+1]))
-    indices = np.tril_indices(n=M.shape[0])
-    vec = 2*vec - M[indices[0], indices[1]]
+    # 深拷贝
+    matrix = copy.deepcopy(M)
+    # 统一转成胖矩阵处理
+    if matrix.shape[0] > matrix.shape[1] :
+        matrix = matrix.T
+    # 对称的部分加到一起
+    if matrix.shape[0] > 1:
+        indices = np.triu_indices(matrix.shape[0]-1)
+        matrix[indices[0], indices[1]+1] *= 2
+    # 取上三角矩阵的前几行索引号
+    indices = np.triu_indices(matrix.shape[1])
+    indices0 = indices[0][indices[0] < matrix.shape[0]]
+    indices1 = indices[1][range(len(indices0))]
+    # 取出对应的元素
+    vec = matrix[indices0, indices1]
     return vec
 
-def vec2mat(vec:np.array) -> np.array:
+def vec2mat(vec:np.array, m=None, n=None) -> np.array:
     '''
     向量化为对称矩阵,向量长度为n(n+1)/2,矩阵维度为n*n
+    可能会改变向量vec的值
     '''
-    ds = do2ds(vec.size + 1)
-    matrix = np.zeros((ds, ds))
-    indices = np.tril_indices(n=ds)
-    matrix[indices[0],indices[1]] += np.copy(vec)
-    matrix.T[indices[0], indices[1]] += np.copy(vec)
-    matrix = matrix / 2
-    return matrix
+    # 判断需要的是胖矩阵还是瘦矩阵
+    transpose = False
+    if m > n :
+        transpose = True
+        m = m + n
+        n = m - n
+        m = m - n
+    # 取上三角矩阵的前m行索引号
+    indices = np.triu_indices(n)
+    indices0 = indices[0][indices[0] < m]
+    indices1 = indices[1][range(len(indices0))]
+    # 构建m*n空矩阵并填入元素
+    matrix = np.empty(shape=(m,n))
+    matrix[indices0, indices1] = vec
+    # 还原对称部分的元素
+    if m > 1:
+        indices = np.triu_indices(m-1)
+        matrix[indices[0], indices[1]+1] /= 2
+        matrix[indices[1]+1, indices[0]] = matrix[indices[0], indices[1]+1]
+    return matrix.T if transpose else matrix
 
+def EVD(M:np.ndarray):
+    '''实矩阵特征值分解'''
+    eigenvalues, eigenvectors = np.linalg.eigh(M)
+    # 筛去近0特征值（可能是由于数值计算误差产生的非常小的值）
+    threshold = 1e-10
+    valid_indices = np.where(np.abs(eigenvalues) > threshold)[0]
+    eigenvalues = eigenvalues[valid_indices]
+    # 特征值分解：M = U @ (E @ E.T) @ U.T
+    U = eigenvectors[:, valid_indices]
+    E = np.linalg.cholesky(np.diag(v=eigenvalues))
+    L = U @ E
+    return L
 
 '''
 P2o
