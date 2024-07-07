@@ -85,7 +85,7 @@ def create_model(dim_state, dim_obs, x0_mu, P0, Q, R, f_real=None, h_real=None) 
 #region generate some data trajectories and save them
 def generate_trajectories(steps, episodes, randSeed, isMismatch=False):
     #region 判断数据是否已经存在
-    dynamics = 'Dynamics2'
+    dynamics = 'Dynamics3'
     fileName = f"data/{dynamics}_steps{steps}_episodes{episodes}_randomSeed{randSeed}"
     if isMismatch:
         fileName += "_mismatch"
@@ -128,4 +128,4 @@ def generate_trajectories(steps, episodes, randSeed, isMismatch=False):
 #endregion
 
 if __name__ == "__main__":
-    generate_trajectories(steps=5000, episodes=1000, randSeed=0, isMismatch=False)
+    generate_trajectories(steps=100, episodes=100, randSeed=10086, isMismatch=False)

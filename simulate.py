@@ -10,7 +10,7 @@ from params import def_param2, set_params
 from plot import plotTrajectory
 
 dataFile = None
-dataFile = "data/Dynamics2_steps100_episodes100_randomSeed0.bin"
+dataFile = "data/Dynamics2_steps100_episodes100_randomSeed10086.bin"
 
 def simulate(model, args, agent=None, sim_num=1, rand_seed=1111, STATUS='EKF', plot_flag=False, x_batch=None, y_batch=None) : 
     #region 常用变量读取
@@ -25,7 +25,9 @@ def simulate(model, args, agent=None, sim_num=1, rand_seed=1111, STATUS='EKF', p
     count = 0
     #endregion
     #region 估计器模型初始化
-    if STATUS == 'PF' : 
+    if STATUS.upper() == 'EKF' or STATUS.upper()=='INIT': 
+        ekf = est.EKF_class(f_fn=model.f, h_fn=model.h, F_fn=model.F, H_fn=model.H, dim_state=model.dim_state, dim_obs=model.dim_obs)
+    elif STATUS == 'PF' : 
         pf = est.Particle_Filter(ds, model.dim_obs, int(1e4), model.f, model.h, model.x0_mu, model.P0)
     #endregion
     #region 生成多条测试轨迹
@@ -62,11 +64,15 @@ def simulate(model, args, agent=None, sim_num=1, rand_seed=1111, STATUS='EKF', p
         elif 'MHE' not in STATUS.upper() : # 单步状态估计，EKF、UKF、PF
             x_hat = args.x0_hat
             P_hat = args.P0_hat
+            ekf.reset(x0=x_hat, P0=P_hat)
             for t in t_seq : 
                 if STATUS.upper() == 'EKF' or STATUS.upper()=='INIT': 
-                    if t == 24:
-                        pass
-                    x_next_hat, P_next_hat = est.EKF(x_hat, P_hat, y_seq[t], model.Q, model.R)
+                    # if t == 24:
+                    #     pass
+                    # x_next_hat, P_next_hat = est.EKF(x_hat, P_hat, y_seq[t], model.Q, model.R)
+                    ekf.estimate(y=y_seq[t], Q=model.Q, R=model.R)
+                    x_next_hat = ekf.x_hat
+                    P_next_hat = ekf.P_hat
                 elif STATUS.upper() == 'IEKF' : 
                     x_next_hat, P_next_hat = est.IEKF(x_hat, P_hat, y_seq[t], model.Q, model.R, times=70)
                 elif STATUS.upper() == 'UKF' : 
@@ -85,7 +91,7 @@ def simulate(model, args, agent=None, sim_num=1, rand_seed=1111, STATUS='EKF', p
             agent.reset(x0_hat=args.x0_hat, P0_hat=args.P0_hat)
             # status_seq = [] # debug
             for t in t_seq : 
-                agent.estimate(y_seq[t], model.Q, model.R)
+                agent.estimate(y=y_seq[t], Q=model.Q, R=model.R)
                 x_next_hat = agent.x_hat
                 x_hat_seq.append(x_next_hat)
                 # status_seq.append(agent.sol_status) # debug
@@ -171,6 +177,7 @@ def simulate(model, args, agent=None, sim_num=1, rand_seed=1111, STATUS='EKF', p
             plotTrajectory(x_seq=x_seq, x_hat_seq=x_hat_seq, STATUS=STATUS)
             plt.show()
         #endregion
+        return MSE_x_avg, RMSE_x_avg
     # end if STATUS(== INIT)
 # end function simulate
 

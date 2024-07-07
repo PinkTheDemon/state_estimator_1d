@@ -12,6 +12,9 @@ def def_param2() :
     # dynamics 2
     parser.add_argument("--x0_hat", default=np.array([0, 0]), help="estimation of initial state distribution average")
     parser.add_argument("--P0_hat", default=np.diag((10., 10.)), help="estimation of initial state distribution covariance")
+    # dynamics 3
+    # parser.add_argument("--x0_hat", default=np.array([0]), help="estimation of initial state distribution average")
+    # parser.add_argument("--P0_hat", default=np.array([[10.]]), help="estimation of initial state distribution covariance")
     parser.add_argument("--MODEL_MISMATCH", default=False, type=bool, help="choose whether to apply model mismatch")
     parser.add_argument("--window", default=1, type=int, help="MHE window length")
     '''training parameters'''
@@ -22,6 +25,8 @@ def def_param2() :
     parser.add_argument("--batch_size", default=50, type=int, help="number of samples for batch update")
     parser.add_argument("--warmup_size", default=200, type=int, help="decide when to start the training of the NN")
     parser.add_argument("--gamma", default=1., type=float, help="discount factor in value function")
+    parser.add_argument("--cov", default=1e0, type=float, help="noise cov in linear.py")
+    parser.add_argument("--isgood", default=0, type=int, help="if init H value is good, in linear.py")
     parser.add_argument("--lr_value", default=1e-3, type=float, help="learning rate of value function")
     parser.add_argument("--lr_policy", default=1e-4, type=float, help="learning rate of policy net")
     parser.add_argument("--lr_policy_min", default=1e-6, type=float, help="minimum learning rate of policy net")
@@ -48,7 +53,7 @@ def set_params(args):
     #     "Q": np.array([[25e-3/3,25e-2/2,0,0,0],[25e-2/2,25e-1,0,0,0],[0,0,25e-3/3,25e-2/2,0],[0,0,25e-2/2,25e-1,0],[0,0,0,0,25e-1]]),
     #     "R": 10*np.eye(3),
     # }
-    model_paras_dict = {
+    model_paras_dict = { # Dynamics 2
         "dim_state": 2,
         "dim_obs": 1,
         "x0_mu": np.array([10, 10]),
@@ -56,22 +61,15 @@ def set_params(args):
         "Q": np.array([[1e0,0],[0,1e0]]),
         "R": np.array([[0.1]]),
     }
-    # model_paras_dict = { # Dynamics 5
+    # model_paras_dict = { # Dynamics 3
     #     "dim_state": 1,
     #     "dim_obs": 1,
-    #     "x0_mu": np.array([0]),
+    #     "x0_mu": np.array([10]),
     #     "P0": np.array([[1.]]),
     #     "Q": np.array([[1.]]),
     #     "R": np.array([[1.]]),
     # }
-    # model_paras_dict = {
-    #     "dim_state": 3,
-    #     "dim_obs": 1,
-    #     "x0_mu": np.array([0.0192, 384.0072, 371.2735]),
-    #     "P0": np.diag([]),
-    #     "Q": np.array([[1e-8,0,0],[0,.25,0],[0,0,.25]]),
-    #     "R": np.array([[.25]]),
-    # }
+    
     estimator_dict = {
         "dim_state": 5,
         "dim_obs": 3,
