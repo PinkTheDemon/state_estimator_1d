@@ -15,16 +15,16 @@ def f(x, u=None, disturb=None, sample_time=0.1, batch_first:bool=True) :
     # x_next[4] = x[4]
     # ####################################################
     # dynamics 2 #########################################
-    x_next[0] = 0.95*x[0] + 0.1*x[1]
-    x_next[1] = -0.98*x[0] + 0.94*x[1]
+    # x_next[0] = 0.95*x[0] + 0.1*x[1]
+    # x_next[1] = -0.98*x[0] + 0.94*x[1]
     # ####################################################
     # dynamics 3 #########################################
-    # x_next[0] = 1.1*x[0]
+    x_next[0] = 1.1*x[0]
     # ####################################################
     x = x_next
     if batch_first is True : x = x.T
 
-    # continuous form
+    #region continuous form
     # xdot = lambda t, y : ( np.array([
     #     # dynamics 3 #####################################
     #     # -x[1],
@@ -47,6 +47,7 @@ def f(x, u=None, disturb=None, sample_time=0.1, batch_first:bool=True) :
     #     for y in x : 
     #         x_next = np.append(x_next, [solve_ivp(xdot, [0,0+sample_time], y).y.T[-1]], axis=0)
     #     x = x_next
+    #endregion
 
     if disturb is not None : x = x + disturb
     return x
@@ -60,11 +61,11 @@ def F(x, u=None, sample_time=0.1) :
     #               [0, 0, 0, 0, 1]])
     # ####################################################
     # jac 2 ##############################################
-    F = np.array([[0.95 , 0.10], 
-                  [-0.98, 0.94]])
+    # F = np.array([[0.95 , 0.10], 
+    #               [-0.98, 0.94]])
     # ####################################################
     # jac 3 ##############################################
-    # F = np.array([[1.1]])
+    F = np.array([[1.1]])
     # ####################################################
     return F
 
@@ -80,8 +81,11 @@ def f_real(x, u=None, disturb=None, sample_time=0.1, batch_first:bool=True) :
     # x_next[4] = x[4]
     # ####################################################
     # dynamics 2 #########################################
-    x_next[0] = 0.65*x[0] + 0.4*x[1]
-    x_next[1] = -0.78*x[0] + 0.74*x[1]
+    # x_next[0] = 0.65*x[0] + 0.4*x[1]
+    # x_next[1] = -0.78*x[0] + 0.74*x[1]
+    # ####################################################
+    # dynamics 3 #########################################
+    x_next[0] = 0.8*x[0]
     # ####################################################
     x = x_next
     if batch_first is True : x = x.T
@@ -97,8 +101,11 @@ def F_real(x, u=None, sample_time=0.1) :
     #               [0, 0, 0, 0, 1]])
     # ####################################################
     # dynamics 2 #########################################
-    F = np.array([[0.65 , 0.40], 
-                  [-0.78, 0.74]])
+    # F = np.array([[0.65 , 0.40], 
+    #               [-0.78, 0.74]])
+    # ####################################################
+    # jac 3 ##############################################
+    F = np.array([[0.8]])
     # ####################################################
     return F
 
@@ -108,10 +115,10 @@ def h(x, noise=None, batch_first:bool=True) :
     # y = np.array([x[0], x[2], x[4]])
     # ####################################################
     # measurement equation 2 #############################
-    y = np.array([x[1]])
+    # y = np.array([x[1]])
     # ####################################################
     # measurement equation 3 #############################
-    # y = np.array([x[0]])
+    y = np.array([x[0]])
     # ####################################################
     if batch_first is True : y = y.T
     if noise is not None : y = y + noise
@@ -124,10 +131,10 @@ def H(x) :
     #               [0, 0, 0, 0, 1]])
     # ###################################################
     # jac 2 #############################################
-    H = np.array([[0,1]])
+    # H = np.array([[0,1]])
     # ###################################################
     # jac 3 #############################################
-    # H = np.array([[1]])
+    H = np.array([[1]])
     # ###################################################
     return H
 
@@ -137,7 +144,10 @@ def h_real(x, noise=None, batch_first:bool=True) :
     # y = np.array([x[0], x[2], x[4]])
     # ####################################################
     # measurement equation 2 #############################
-    y = np.array([x[1]])
+    # y = np.array([x[1]])
+    # ####################################################
+    # measurement equation 3 #############################
+    y = np.array([x[0]])
     # ####################################################
     if batch_first is True : y = y.T
     if noise is not None : y = y + noise
@@ -150,42 +160,13 @@ def H_real(x) :
     #               [0, 0, 0, 0, 1]])
     # ###################################################
     # jac 2 #############################################
-    H = np.array([[0,1]])
+    # H = np.array([[0,1]])
+    # ###################################################
+    # jac 3 #############################################
+    H = np.array([[1]])
     # ###################################################
     return H
 
-# system dynamics
-def step(x, u=None, disturb=None, noise=None) : 
-    x_next = f(x, u=u, disturb=disturb)
-    y_next = h(x_next, noise)
-    return x_next, y_next
-
-
-# generate noise list for ith simulation
-def reset(sim_num, maxstep, x0_mu, P0, disturb_Q, noise_R, 
-          disturb_mu=None, noise_mu=None) : 
-    np.random.seed(sim_num)
-    
-    if P0.size == 0 : 
-        initial_state = x0_mu
-    else :
-        initial_state = x0_mu + (np.random.multivariate_normal(np.zeros_like(x0_mu), P0))
-
-    if disturb_mu is None : 
-        disturb_mu = np.zeros(disturb_Q.shape[0])
-    if noise_mu is None : 
-        noise_mu = np.zeros(noise_R.shape[0])
-
-    if disturb_Q.size == 0 : 
-        disturb_list = np.zeros((maxstep, disturb_mu.size))
-    else : 
-        disturb_list = np.random.multivariate_normal(disturb_mu, disturb_Q, maxstep)
-    if noise_R.size == 0 : 
-        noise_list = np.zeros((maxstep, noise_mu.size))
-    else : 
-        noise_list = np.random.multivariate_normal(noise_mu, noise_R, maxstep)
-
-    return initial_state, disturb_list, noise_list
 
 
 '''
