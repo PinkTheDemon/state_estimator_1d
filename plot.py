@@ -29,6 +29,8 @@ def plotReward(rewardSeq, filename=None) -> None :
 
 
 def plotTrajectory(x_seq, x_hat_seq, STATUS="None") -> None:
+    x_seq = np.array(x_seq)
+    x_hat_seq = np.array(x_hat_seq)
     ds = x_seq[0].size
     max_steps = len(x_seq)
     t_seq = range(max_steps)

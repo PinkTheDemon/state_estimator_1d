@@ -38,7 +38,7 @@ def generate_data(model, modelParam, steps, randSeed):
         y_seq.append(y_next)
     return x_seq, y_seq
 
-# 生成并保存数据轨迹，对外接口
+# 生成并保存数据轨迹
 def generate_trajectories(modelName, steps, episodes, randSeed, isSave=True):
     #region 判断数据是否已经存在
     fileName = f"data/{modelName}_steps{steps}_episodes{episodes}_randomSeed{randSeed}"
@@ -60,7 +60,7 @@ def generate_trajectories(modelName, steps, episodes, randSeed, isSave=True):
         trajs["y_batch"].append(y_seq)
 
     if isSave:
-        print("Data saving, please wait...")
+        print("Data saving, please wait...", flush=True)
         #region save trajectories and relative information
         with open(file=fileName+".bin", mode="wb") as f:
             pickle.dump(trajs, f)
@@ -74,5 +74,17 @@ def generate_trajectories(modelName, steps, episodes, randSeed, isSave=True):
     else :
         return trajs
 
+# 根据相关信息获取数据，对外接口
+def getData(modelName, steps, episodes, randSeed):
+    fileName = f"data/{modelName}_steps{steps}_episodes{episodes}_randomSeed{randSeed}.bin"
+    if os.path.isfile(fileName) :
+        with open(file=fileName, mode="rb") as f:
+            trajs = pickle.load(f)
+    else :
+        trajs = generate_trajectories(modelName=modelName, steps=steps, episodes=episodes, randSeed=randSeed, isSave=False)
+    x_batch = trajs["x_batch"]
+    y_batch = trajs["y_batch"]
+    return x_batch, y_batch
+
 if __name__ == "__main__":
-    generate_trajectories(modelName="Dynamics3", steps=30, episodes=50, randSeed=10086)
+    generate_trajectories(modelName="Dynamics3", steps=100, episodes=100, randSeed=10086)
