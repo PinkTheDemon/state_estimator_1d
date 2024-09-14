@@ -120,7 +120,42 @@ class Dynamics3(Model):
     def H(self, **args) : 
         return np.array([[1]])
 
+class Augment2(Model):
+    def __init__(self) -> None:
+        super().__init__("Augment2", 4, 2)
+
+    def f(self, x, batch_first:bool=True, **args) : 
+        # disceret form
+        if batch_first is True : x = x.T
+        x_next = np.zeros_like(x)
+        x_next = np.zeros_like(x)
+        x_next[0] = 0.95*x[0] + 0.1*x[1]
+        x_next[1] = -0.98*x[0] + 0.94*x[1]
+        x_next[2] = 0.3*x[0] - 0.3*x[1] + 0.65*x[2] + 0.4*x[3]
+        x_next[3] = -0.2*x[0] + 0.2*x[1] - 0.78*x[2] + 0.74*x[3]
+        x = x_next
+        if batch_first is True : x = x.T
+        return x
+
+    def F(self, **args) : 
+        return np.array([[0.95, 0.1, 0, 0],
+                        [-0.98, 0.94, 0, 0],
+                        [0.3, -0.3, 0.65 , 0.40], 
+                        [-0.2, 0.2, -0.78, 0.74]])
+
+    def h(self, x, batch_first:bool=True, **args) : 
+        if batch_first is True : x = x.T
+        y = np.array([x[1],
+                      x[3]])
+        if batch_first is True : y = y.T
+        return y
+
+    def H(self, **args) : 
+        return np.array([[0,1, 0,0],
+                         [0,0, 0,1]])
+
 # 对外接口
 def getModel(modelName) :
     if modelName == "Dynamics2": return Dynamics2()
     if modelName == "Dynamics3": return Dynamics3()
+    if modelName == "Augment2": return Augment2()

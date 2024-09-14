@@ -9,21 +9,21 @@ from params import getModelParams
 def generate_data(model, modelParam, steps, randSeed):
     np.random.seed(randSeed)
     # 生成初始状态
-    if not modelParam["P0"] : 
+    if modelParam["P0"] is None:
         initial_state = modelParam["x0_mu"]
     else :
         initial_state = modelParam["x0_mu"] + np.random.multivariate_normal(np.zeros_like(modelParam["x0_mu"]), modelParam["P0"])
     # 生成噪声序列
-    if not hasattr(modelParam, "Q") or not modelParam["Q"]:
+    if not hasattr(modelParam, "Q") or modelParam["Q"] is None:
         disturb_list = np.zeros((steps, model.dim_state))
     else : 
-        if not hasattr(modelParam, "disturbMu") or not modelParam["disturbMu"]: 
+        if not hasattr(modelParam, "disturbMu") or modelParam["disturbMu"] is None:
             modelParam["disturbMu"] = np.zeros(model.dim_state)
         disturb_list = np.random.multivariate_normal(modelParam["disturbMu"], modelParam["Q"], steps)
-    if not hasattr(modelParam, "R") or not modelParam["R"]:
+    if not hasattr(modelParam, "R") or modelParam["R"] is None:
         noise_list = np.zeros((steps, model.dim_obs))
     else : 
-        if not hasattr(modelParam, "noiseMu") or not modelParam["noiseMu"]: 
+        if not hasattr(modelParam, "noiseMu") or modelParam["noiseMu"] is None:
             modelParam["noiseMu"] = np.zeros(model.dim_obs)
         noise_list = np.random.multivariate_normal(modelParam["noiseMu"], modelParam["R"], steps)
     # 生成状态序列和观测序列
@@ -87,4 +87,4 @@ def getData(modelName, steps, episodes, randSeed):
     return x_batch, y_batch
 
 if __name__ == "__main__":
-    generate_trajectories(modelName="Dynamics3", steps=100, episodes=100, randSeed=10086)
+    generate_trajectories(modelName="Augment2", steps=100, episodes=100, randSeed=10086)
