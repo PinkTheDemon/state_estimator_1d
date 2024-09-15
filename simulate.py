@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 import estimator as est
-from functions import inv, LogFile, isConverge
+from functions import inv, LogFile, isConverge, calMSE
 from model import getModel
 from gendata import getData
 from plot import plotTrajectory
@@ -15,21 +15,6 @@ def getSysFuns(model, modelErr):
         return model.f, model.h, model.F, model.H
     else :
         return model.f_real, model.h_real, model.F_real, model.H_real
-
-def calMSE(x_batch, y_batch, xhat_batch, yhat_batch):
-    # state MSE
-    x_batch = np.array(x_batch)
-    xhat_batch = np.array(xhat_batch)
-    SE_x = np.square(x_batch - xhat_batch)
-    MSE_x = np.mean(np.mean(SE_x, axis=0), axis=0)
-    RMSE_x = np.sqrt(np.mean(MSE_x))
-    # observation MSE
-    y_batch = np.array(y_batch)
-    yhat_batch = np.array(yhat_batch)
-    SE_y = np.square(y_batch - yhat_batch)
-    MSE_y = np.mean(np.mean(SE_y, axis=0), axis=0)
-    RMSE_y = np.sqrt(np.mean(MSE_y))
-    return MSE_x, RMSE_x, MSE_y, RMSE_y
 
 # 对外接口
 def simulate(agent:est.Estimator, estParams, x_batch, y_batch, isPrint=False, isPlot=False):
@@ -62,7 +47,8 @@ def simulate(agent:est.Estimator, estParams, x_batch, y_batch, isPrint=False, is
         Phat_batch.append(Phat_seq)
     #endregion 状态估计
     # 计算性能指标
-    MSE_x, RMSE_x, MSE_y, RMSE_y = calMSE(x_batch=x_batch, y_batch=y_batch, xhat_batch=xhat_batch, yhat_batch=yhat_batch)
+    MSE_x, RMSE_x = calMSE(x_batch=x_batch, xhat_batch=xhat_batch)
+    MSE_y, RMSE_y = calMSE(x_batch=y_batch, xhat_batch=yhat_batch)
     # 打印
     if isPrint:
         print(f"state MSE of {agent.name}: {MSE_x}, RMSE: {RMSE_x}")
