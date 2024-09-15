@@ -1,5 +1,4 @@
 import time
-import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -78,7 +77,7 @@ def simulate(agent:est.Estimator, estParams, x_batch, y_batch, isPrint=False, is
 
 if __name__ == "__main__" : 
     # 选择模型、仿真步数以及轨迹条数
-    model = getModel(modelName="Dynamics3")
+    model = getModel(modelName="Augment2")
     steps = 100
     episodes = 100
     randSeed = 10086
@@ -116,7 +115,7 @@ if __name__ == "__main__" :
             print(f"{status.upper()}:", flush=True)
             # 生成EKF类
             f, h, F, H = getSysFuns(model=model, modelErr=estParams["modelErr"])
-            ekf = est.EKF_class(f_fn=f, h_fn=h, F_fn=F, H_fn=H, dim_state=model.dim_state, dim_obs=model.dim_obs)
+            ekf = est.EKF_class(f_fn=f, h_fn=h, F_fn=F, H_fn=H)
             simulate(agent=ekf, estParams=estParams, x_batch=x_batch, y_batch=y_batch, isPrint=isPrint, isPlot=isPlot)
             print("********************")
     logfile.flush()

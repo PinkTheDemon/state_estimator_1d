@@ -5,6 +5,18 @@ from scipy.stats import multivariate_normal
 from functions import block_diag, inv, delete_empty, isConverge
 import dynamics as dyn
 
+class Estimator:
+    def __init__(self, name, x0_hat=None, P0_hat=None) -> None:
+        self.name = name
+        self.reset(x0_hat=x0_hat, P0_hat=P0_hat)
+
+    def reset(self, x0_hat, P0_hat):
+        self.x_hat = x0_hat
+        self.P_hat = P0_hat
+
+    def estimate(self):
+        pass
+
 # calculate (P^-1)*
 def cal_Poptim(A:np.ndarray, C:np.ndarray, Q:np.ndarray, R:np.ndarray, B=None, gamma=1.0, tol=1e-4) -> np.ndarray:
     # P0 = np.ones_like(a=A)
@@ -25,20 +37,20 @@ def cal_Poptim(A:np.ndarray, C:np.ndarray, Q:np.ndarray, R:np.ndarray, B=None, g
     return P_list[-1]
 
 # Extended Kalman Filter
-def EKF (x, P, y_next, Q, R) : 
+def EKF(x, P, y_next, model) : 
     # linearization system matrix 1 #####################
     F = dyn.F(x)
     # ###################################################
 
     # predict
     P_pre = F @ P @ F.T
-    if Q.size != 0 : P_pre = P_pre + Q
-    x_pre, y_pre = dyn.step(x)
+    if not model.Q : P_pre = P_pre + model.Q
+    x_pre, y_pre = model.step(x=x)
     # update
-    H = dyn.H(x_pre)
+    H = model.H(x=x_pre)
     # P_hat = inv(inv(P_pre) + H.T@inv(R)@H)
-    P_hat = P_pre - P_pre@H.T@inv(R+H@P_pre@H.T)@H@P_pre
-    x_hat = x_pre - P_hat@H.T@inv(R)@(y_pre - y_next)
+    P_hat = P_pre - P_pre@H.T@inv(model.R+H@P_pre@H.T)@H@P_pre
+    x_hat = x_pre - P_hat@H.T@inv(model.R)@(y_pre - y_next)
     #region 能观性矩阵
     O = np.vstack((H))#, H@F, H@F@F
     if np.linalg.matrix_rank(O) < 1:
@@ -46,21 +58,14 @@ def EKF (x, P, y_next, Q, R) :
     #endregion
     return x_hat, P_hat
 
-class EKF_class:
-    def __init__(self, f_fn, h_fn, F_fn, H_fn, dim_state, dim_obs, x0=None, P0=None) -> None:
+class EKF_class(Estimator):
+    def __init__(self, f_fn, h_fn, F_fn, H_fn, x0_hat=None, P0_hat=None) -> None:
         self.f_fn = f_fn
         self.h_fn = h_fn
         self.F_fn = F_fn
         self.H_fn = H_fn
-        self.dim_state = dim_state
-        self.dim_obs = dim_obs
-        if x0 is not None and P0 is not None:
-            self.reset(x0=x0, P0=P0)
+        super().__init__(name="EKF", x0_hat=x0_hat, P0_hat=P0_hat)
 
-    def reset(self, x0, P0):
-        self.x_hat = x0
-        self.P_hat = P0
-    
     def predict(self, Q, u=None):
         F = self.F_fn(x=self.x_hat, u=u)
         self.x_hat = self.f_fn(x=self.x_hat, u=u)
