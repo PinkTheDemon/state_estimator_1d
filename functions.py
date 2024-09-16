@@ -1,4 +1,5 @@
 import numpy as np
+import pickle
 import copy
 import sys
 import os
@@ -71,6 +72,8 @@ def checkFilename(filename:str) -> str :
 
 class LogFile() : 
     def __init__(self, fileName='output/log.txt', rename_option=False) -> None:
+        # 保留现场
+        
         # 文件已经存在则自动更名
         if rename_option : 
             baseName, extension = os.path.splitext(fileName)
@@ -95,6 +98,9 @@ class LogFile() :
         sys.stdout.close()
         sys.stdout = sys.__stdout__
         del self
+
+    def __del__(self) -> None:
+        self.endLog()
 
 
 def P3dtoP4d(x_bar, P3d, h3d=None) : 
@@ -216,6 +222,14 @@ def EVD(M:np.ndarray):
     E = np.linalg.cholesky(np.diag(v=eigenvalues))
     L = U @ E
     return L
+
+def calMSE(x_batch, xhat_batch):
+    x_batch = np.array(x_batch)
+    xhat_batch = np.array(xhat_batch)
+    SE = np.square(x_batch - xhat_batch)
+    MSE = np.mean(np.mean(SE, axis=0), axis=0)
+    RMSE = np.sqrt(np.mean(MSE))
+    return MSE, RMSE
 
 '''
 P2o

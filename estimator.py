@@ -12,6 +12,7 @@ class Estimator:
 
     def reset(self, x0_hat, P0_hat):
         self.x_hat = x0_hat
+        self.y_hat = None
         self.P_hat = P0_hat
 
     def estimate(self):
@@ -37,20 +38,17 @@ def cal_Poptim(A:np.ndarray, C:np.ndarray, Q:np.ndarray, R:np.ndarray, B=None, g
     return P_list[-1]
 
 # Extended Kalman Filter
-def EKF(x, P, y_next, model) : 
-    # linearization system matrix 1 #####################
-    F = dyn.F(x)
-    # ###################################################
-
+def EKF(x, P, y_next, model, Q, R) : # 用标称模型做EKF，不感知真实模型
+    F = model.F(x=x)
     # predict
     P_pre = F @ P @ F.T
-    if not model.Q : P_pre = P_pre + model.Q
+    if Q is not None : P_pre = P_pre + Q
     x_pre, y_pre = model.step(x=x)
     # update
     H = model.H(x=x_pre)
     # P_hat = inv(inv(P_pre) + H.T@inv(R)@H)
-    P_hat = P_pre - P_pre@H.T@inv(model.R+H@P_pre@H.T)@H@P_pre
-    x_hat = x_pre - P_hat@H.T@inv(model.R)@(y_pre - y_next)
+    P_hat = P_pre - P_pre@H.T@inv(R+H@P_pre@H.T)@H@P_pre
+    x_hat = x_pre - P_hat@H.T@inv(R)@(y_pre - y_next)
     #region 能观性矩阵
     O = np.vstack((H))#, H@F, H@F@F
     if np.linalg.matrix_rank(O) < 1:
@@ -77,6 +75,7 @@ class EKF_class(Estimator):
         H = self.H_fn(x=self.x_hat)
         self.P_hat = self.P_hat - self.P_hat@H.T@inv(R+H@self.P_hat@H.T)@H@self.P_hat
         self.x_hat = self.x_hat - self.P_hat@H.T@inv(R)@(y_pre - y)
+        self.y_hat = self.h_fn(x=self.x_hat)
 
     def estimate(self, y, Q, R, u=None):
         self.predict(Q=Q, u=u)

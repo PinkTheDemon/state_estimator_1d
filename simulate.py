@@ -1,9 +1,8 @@
 import time
-import numpy as np
 import matplotlib.pyplot as plt
 
 import estimator as est
-from functions import inv, LogFile, isConverge, calMSE
+import functions as fc
 from model import getModel
 from gendata import getData
 from plot import plotTrajectory
@@ -12,9 +11,9 @@ from params import getEstParams, getModelParams
 
 def getSysFuns(model, modelErr):
     if modelErr:
-        return model.f, model.h, model.F, model.H
-    else :
         return model.f_real, model.h_real, model.F_real, model.H_real
+    else :
+        return model.f, model.h, model.F, model.H
 
 # 对外接口
 def simulate(agent:est.Estimator, estParams, x_batch, y_batch, isPrint=False, isPlot=False):
@@ -38,7 +37,7 @@ def simulate(agent:est.Estimator, estParams, x_batch, y_batch, isPrint=False, is
         for y in y_seq:
             agent.estimate(y=y, Q=estParams["Q"], R=estParams["R"])
             xhat_seq.append(agent.x_hat)
-            yhat_seq.append(agent.h_fn(x=agent.x_hat))
+            yhat_seq.append(agent.y_hat)
             Phat_seq.append(agent.P_hat)
         timeEnd = time.process_time()
         execution_time += 1000 * (timeEnd - timeStart) / steps / episodes
@@ -47,8 +46,8 @@ def simulate(agent:est.Estimator, estParams, x_batch, y_batch, isPrint=False, is
         Phat_batch.append(Phat_seq)
     #endregion 状态估计
     # 计算性能指标
-    MSE_x, RMSE_x = calMSE(x_batch=x_batch, xhat_batch=xhat_batch)
-    MSE_y, RMSE_y = calMSE(x_batch=y_batch, xhat_batch=yhat_batch)
+    MSE_x, RMSE_x = fc.calMSE(x_batch=x_batch, xhat_batch=xhat_batch)
+    MSE_y, RMSE_y = fc.calMSE(x_batch=y_batch, xhat_batch=yhat_batch)
     # 打印
     if isPrint:
         print(f"state MSE of {agent.name}: {MSE_x}, RMSE: {RMSE_x}")
@@ -63,22 +62,21 @@ def simulate(agent:est.Estimator, estParams, x_batch, y_batch, isPrint=False, is
 
 if __name__ == "__main__" : 
     # 选择模型、仿真步数以及轨迹条数
-    model = getModel(modelName="Augment2")
+    model = getModel(modelName="Dynamics2")
     steps = 100
     episodes = 100
     randSeed = 10086
     modelErr = True
     isPrint = True
-    isPlot = True
+    isPlot = False
     # 选择执行测试的方法
     test_options = ["EKF"] # , "UKF", "UKF-MHE", "FIE", "IEKF", "EKF-MHE"
     # 生成数据以及参数
     x_batch, y_batch = getData(modelName=model.name, steps=steps, episodes=episodes, randSeed=randSeed)
     modelParams = getModelParams(modelName=model.name)
-    estParams = getEstParams(modelName=model.name)
-    estParams["modelErr"] = modelErr
+    estParams = getEstParams(modelName=model.name, modelErr=modelErr)
     # 重定向系统输出以及打印仿真信息
-    logfile = LogFile("output/test_results.txt", rename_option=False)
+    logfile = fc.LogFile("output/test_results.txt", rename_option=False)
     print("model params:")
     for key, val in modelParams.items():
         print(f"{key}: {val}")
