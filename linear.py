@@ -12,10 +12,6 @@ from plot import plotReward
 from model import getModel, Model
 from estimator import EKF, Estimator, cal_Poptim
 
-#region 设置绘图中文
-plt.rcParams['font.sans-serif'] = ['Microsoft YaHei']
-plt.rcParams['axes.unicode_minus'] = False 
-plt.rcParams['font.size'] = 20
 
 # class LSTDO:
 #     '''Linear Observer Learning by Temporal Difference'''
