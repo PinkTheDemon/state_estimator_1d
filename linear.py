@@ -155,9 +155,7 @@ class RL_Observer(Estimator):
         self.x_hat = x0_hat
         self.y_hat = None
         self.P_hat = P0_hat
-        self.xhat_list = [self.x_hat]
         self.y_list = []
-        self.yaug_list = []
         self.ytilde_list = []
         self.omega_list = []
         self.X = None
@@ -238,6 +236,7 @@ class RL_Observer(Estimator):
         Q = estParams["Q"]
         R = estParams["R"]
         self.cov = trainParams['cov'] if isinstance(trainParams['cov'], np.ndarray) else trainParams['cov']*np.eye(ds)
+        self.noiseGen = fc.RandomGenerator(randomFun=np.random.multivariate_normal, rand_num=111)
         print(f"gamma: {self.gamma}, cov: {self.cov}, goodInit:", trainParams["goodInit"])
         # 初始参数
         if trainParams["goodInit"]:
@@ -369,7 +368,6 @@ class RL_Observer(Estimator):
         return X
 
     def getOmegaAndX(self, X, N, ytilde_k, Q, y_k=None, noise=None):
-        ds = self.model.dim_state
         do = self.model.dim_obs
         du = self.dim_omega
         # 分解
@@ -446,11 +444,7 @@ class RL_Observer(Estimator):
         K_ytilde = K @ H_ytilde
         return (K_omega, K_ytilde)
 
-    def trainData(self, y_batch, Q, R, x0_hat, P0_hat, cov=None):
-        N = self.N
-        if cov is not None: 
-            self.cov = cov
-        self.noiseGen = fc.RandomGenerator(randomFun=np.random.multivariate_normal, rand_num=111)
+    def trainData(self, y_batch, Q, R, x0_hat, P0_hat):
         A_batch = []
         b_batch = []
         for y_seq in y_batch:
