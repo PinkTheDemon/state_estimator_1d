@@ -5,6 +5,7 @@ class Model:
         self.name = name
         self.dim_state = ds
         self.dim_obs = do
+        self.modelErr = False
 
     # 打印非函数成员变量
     def printAttr(self) -> None:
@@ -45,6 +46,7 @@ class Model:
 class Dynamics2(Model):
     def __init__(self) -> None:
         super().__init__("Dynamics2", 2, 1)
+        self.modelErr = True
 
     def f(self, x, batch_first:bool=True, **args) : 
         # disceret form
@@ -86,6 +88,7 @@ class Dynamics2(Model):
 class Dynamics3(Model):
     def __init__(self) -> None:
         super().__init__("Dynamics3", 1, 1)
+        self.modelErr = True
 
     def f(self, x, batch_first:bool=True, **args) : 
         # disceret form
