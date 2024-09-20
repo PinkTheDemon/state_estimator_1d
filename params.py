@@ -66,10 +66,10 @@ def getEstParams(modelName, **args):
         estParams = {
             "x0_hat": np.array([10,10,10,10]),
             "P0_hat": np.diag((10., 10., 10, 10)),
-            "Q": np.array([[1,0,1,0],
-                           [0,1,0,1],
-                           [1,0,1,0],
-                           [0,1,0,1]]),
+            "Q": np.array([[1,0,0,0],
+                           [0,1,0,0],
+                           [0,0,1,0],
+                           [0,0,0,1]]),
             "R": np.array([[1,0], [0,1]]),
         }
     estParams |= args
@@ -78,7 +78,7 @@ def getEstParams(modelName, **args):
 def getTrainParams(estorName, **args):
     if estorName == "RL_Observer":
         trainParams = {
-            "trainEpis": 1000,
+            "trainEpis": 100,
             "steps": 30,
             "episodes": 50,
             "randSeed": 0,

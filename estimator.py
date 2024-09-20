@@ -19,17 +19,19 @@ class Estimator:
         pass
 
 # calculate (P^-1)*
-def cal_Poptim(A:np.ndarray, C:np.ndarray, Q:np.ndarray, R:np.ndarray, B=None, gamma=1.0, tol=1e-4) -> np.ndarray:
-    # P0 = np.ones_like(a=A)
-    P0 = np.eye(A.shape[0])
+def cal_Poptim(A:np.ndarray, C:np.ndarray, Q:np.ndarray, R:np.ndarray, B=None, P0=None, gamma=1.0, tol=1e-4) -> np.ndarray:
+    '''LQR
+    c(x,u) = u.T@R@u + y.T@Q@y
+    V(x) = x.T@P@x = c(x,u) + gamma@V'(x)
+    '''
+    if P0 is None:
+        P0 = np.eye(A.shape[0])
     if B is None :
         B = -np.eye(A.shape[0])
-    # else :
-    #     P0 = block_diag((P0, P0))
     P_list = [P0]
     while True:
         P = P_list[-1]
-        P = C.T@inv(R)@C + gamma*A.T@P@A - gamma**2*A.T@P@B@inv(inv(Q) + gamma*B.T@P@B)@B.T@P@A
+        P = C.T@Q@C + gamma*A.T@P@A - gamma**2*A.T@P@B@inv(R + gamma*B.T@P@B)@B.T@P@A
         P_list.append(P)
         if len(P_list) >= 5:
             del P_list[0]
