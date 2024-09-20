@@ -12,6 +12,10 @@ from plot import plotReward
 from model import getModel, Model
 from estimator import EKF, Estimator, cal_Poptim
 
+#region 设置绘图中文
+plt.rcParams['font.sans-serif'] = ['Microsoft YaHei']
+plt.rcParams['axes.unicode_minus'] = False 
+plt.rcParams['font.size'] = 20
 
 # class LSTDO:
 #     '''Linear Observer Learning by Temporal Difference'''
@@ -143,8 +147,8 @@ class RL_Observer(Estimator):
         self.gamma = gamma
         # 可变
         super().__init__(name="RL_Observer", x0_hat=x0_hat, P0_hat=P0_hat)
-        self.rH = 2#self.dim_state
-        Hsize =  self.model.dim_state*(self.model.dim_state+2*self.model.dim_obs) # self.dim_state*(self.dim_state+dim_obs)
+        self.rH = 2*self.dim_omega if self.model.modelErr else self.dim_omega
+        Hsize =  self.N*(self.dim_omega+2*self.model.dim_obs) if self.model.modelErr else self.N*(self.dim_omega+self.model.dim_obs)
         self.H = fc.block_diag((5*np.eye(N=self.rH), np.zeros(shape=(Hsize-self.rH, Hsize-self.rH))))
 
     def reset(self, x0_hat, P0_hat) -> None:
@@ -169,12 +173,18 @@ class RL_Observer(Estimator):
             ytilde = y - self.y_hat
             self.ytilde_list.append(ytilde)
         else :
+            if self.model.modelErr:
+                y_list=self.y_list[:-1]
+                y_k=self.y_list[-1]
+            else :
+                y_list = None
+                y_k = None
             if self.X is None :
-                self.X = self.getX(omega_list=self.omega_list[1:], ytilde_list=self.ytilde_list[:-1], y_list=self.y_list[:-1])
+                self.X = self.getX(omega_list=self.omega_list[1:], ytilde_list=self.ytilde_list[:-1], y_list=y_list)
             noise = None
             if enableNoise:
                 noise = self.noiseGen.getRandom(mean=np.zeros((du,)), cov=self.cov*np.eye(ds)).reshape((-1,1))
-            omega, self.X = self.getOmegaAndX(X=self.X, N=self.N, ytilde_k=self.ytilde_list[-1], Q=Q, y_k=self.y_list[-1], noise=noise)
+            omega, self.X = self.getOmegaAndX(X=self.X, N=self.N, ytilde_k=self.ytilde_list[-1], Q=Q, y_k=y_k, noise=noise)
             self.x_hat = self.model.f(x=self.x_hat) + omega.reshape(-1,)
             self.y_hat = self.model.h(x=self.x_hat)
             self.ytilde_list = [y - self.y_hat]
@@ -184,7 +194,7 @@ class RL_Observer(Estimator):
         ds = self.model.dim_state
         A = self.model.F_real()
         A0 = self.model.F()
-        deltaA = A - A0
+        deltaA = np.round(A - A0, decimals=4)
         C = self.model.H_real()
         C0 = self.model.H()
         deltaC = C - C0
@@ -196,29 +206,30 @@ class RL_Observer(Estimator):
         V_N_linv = np.linalg.inv(V_N.T@V_N)@V_N.T
         Vhat_N_linv = np.linalg.inv(Vhat_N.T@Vhat_N)@Vhat_N.T
         # 计算M
-        """no model error"""
-        # M_ytilde = A0__N@Vhat_N_linv
-        # M_omega = Uhat_N - M_ytilde@T_N
-        # M = np.concatenate((M_omega, M_ytilde), axis=1)
-        """with model error"""
-        Mhat_omega = Uhat_N - A0__N@Vhat_N_linv@T_N
-        M_omega = np.zeros_like(Mhat_omega)
-        Mhat_y = (P_N - A0__N@Vhat_N_linv@(Lambda_N + Phi_N))@V_N_linv
-        M_y = A__N@V_N_linv
-        Mhat_ytilde = A0__N@Vhat_N_linv
-        M_ytilde = np.zeros_like(Mhat_ytilde)
-        M = np.hstack((M_omega, M_y, M_ytilde))
-        Mhat = np.hstack((Mhat_omega, Mhat_y, Mhat_ytilde))
-        M = np.vstack((M, Mhat))
-        # 计算Pinv_optim(模型误差情况下)
-        A0 = np.vstack((np.zeros_like(A0), A0))
-        A0 = np.hstack((np.vstack((A, deltaA)), A0))
-        C0 = np.vstack((np.zeros_like(C0), C0))
-        C0 = np.hstack((np.vstack((C, deltaC)), C0))
-        R = fc.block_diag((R,R))
-        B0 = np.zeros_like(A)
-        B0 = np.vstack((B0, -np.eye(A.shape[0])))
-        Pinv_optim = cal_Poptim(A=A0, B=B0, C=C0, Q=Q, R=R, gamma=self.gamma, tol=1e-6)
+        if self.model.modelErr:
+            Mhat_omega = Uhat_N - A0__N@Vhat_N_linv@T_N
+            M_omega = np.zeros_like(Mhat_omega)
+            Mhat_y = (P_N - A0__N@Vhat_N_linv@(Lambda_N + Phi_N))@V_N_linv
+            M_y = A__N@V_N_linv
+            Mhat_ytilde = A0__N@Vhat_N_linv
+            M_ytilde = np.zeros_like(Mhat_ytilde)
+            M = np.hstack((M_omega, M_y, M_ytilde))
+            Mhat = np.hstack((Mhat_omega, Mhat_y, Mhat_ytilde))
+            M = np.vstack((M, Mhat))
+            # 计算Pinv_optim(模型误差情况下)
+            A0 = np.vstack((np.zeros_like(A0), A0))
+            A0 = np.hstack((np.vstack((A, deltaA)), A0))
+            C0 = np.vstack((np.zeros_like(C0), C0))
+            C0 = np.hstack((np.vstack((C, deltaC)), C0))
+            R = fc.block_diag((R,R))
+            B0 = np.zeros_like(A)
+            B0 = np.vstack((B0, -np.eye(A.shape[0])))
+            Pinv_optim = cal_Poptim(A=A0, B=B0, C=C0, Q=fc.inv(R), R=fc.inv(Q), gamma=1)
+        else :
+            M_ytilde = A__N@V_N_linv
+            M_omega = U_N - M_ytilde@T_N
+            M = np.hstack((M_omega, M_ytilde))
+            Pinv_optim = cal_Poptim(A=A, C=C, Q=fc.inv(R), R=fc.inv(Q), gamma=1)
         # 计算H*
         self.M = M
         H = M.T@Pinv_optim@M
@@ -279,11 +290,11 @@ class RL_Observer(Estimator):
             Kytilde_abserror_batch.append(np.linalg.norm(self.calK(R=fc.inv(Q))[1] - K_optim[1], ord='fro'))
             Heigvalues_batch.append(np.linalg.eigvals(self.H))
             # 参数收敛则提前结束
-            Lvec_batch.append(Lvec)
-            if len(Lvec_batch) > 10:
-                del Lvec_batch[0]
-                if fc.isConverge(Lvec_batch, tol=1e-8):
-                    break
+            # Lvec_batch.append(Lvec)
+            # if len(Lvec_batch) > 10:
+            #     del Lvec_batch[0]
+            #     if fc.isConverge(Lvec_batch, tol=1e-8):
+            #         break
         #region 测试
         xhat_batch_test, _ = sim.simulate(agent=self, estParams=estParams, x_batch=x_batch_test, y_batch=y_batch_test)
         MSE, RMSE = fc.calMSE(x_batch=x_batch_test, xhat_batch=xhat_batch_test)
@@ -469,7 +480,10 @@ class RL_Observer(Estimator):
 
 def main():
     #region 测试的模型和参数
-    model = getModel(modelName="Dynamics3")
+    model = getModel(modelName="Dynamics2")
+    # model.modelErr = False
+    # model.f = model.f_real
+    # model.F = model.F_real
     steps = 100
     episodes = 100
     randSeed = 10086
@@ -491,8 +505,8 @@ def main():
     trainParams = pm.getTrainParams(estorName="RL_Observer", cov=eval(args.cov), goodInit=args.goodInit, gamma=args.gamma)
     x_batch_test, y_batch_test = getData(modelName=model.name, steps=steps, episodes=episodes, randSeed=randSeed)
     estimator = RL_Observer(model=model, x0_hat=None, P0_hat=None, gamma=trainParams["gamma"])
-    # estimator.H = estimator.calHoptim(Q=estParams["Q"], R=estParams["R"]) # 测试最优H解析表达式是否正确
-    estimator.train(x_batch_test=x_batch_test, y_batch_test=y_batch_test, estParams=estParams, trainParams=trainParams)
+    estimator.H = estimator.calHoptim(Q=estParams["Q"], R=estParams["R"]) # 测试最优H解析表达式是否正确
+    # estimator.train(x_batch_test=x_batch_test, y_batch_test=y_batch_test, estParams=estParams, trainParams=trainParams)
     # test
     sim.simulate(agent=estimator, estParams=estParams, x_batch=x_batch_test, y_batch=y_batch_test, isPrint=True)
     #endregion
