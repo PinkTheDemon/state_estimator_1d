@@ -462,12 +462,12 @@ class RL_Observer(Estimator):
                 self.estimate(y=y, Q=Q, R=R, enableNoise=True)
                 if self.X is not None:
                     A_seq.append(self.X@self.X.T)
-                    b_seq.append(self.calTDtarget(X=self.X))
+                    b_seq.append(self.calTDtarget(X=self.X, Q=Q, R=R))
             A_batch.extend(A_seq[:-1])
             b_batch.extend(b_seq[1:])
         return A_batch, b_batch
 
-    def calTDtarget(self, X):
+    def calTDtarget(self, X, Q, R):
         do = self.model.dim_obs
         du = self.dim_omega
         N = self.N
@@ -475,7 +475,7 @@ class RL_Observer(Estimator):
         omega_k = X[:du]
         ytilde_k = X[-N*do:-(N-1)*do]
         # 计算TDtarget
-        target = omega_k.T@omega_k + ytilde_k.T@ytilde_k + X.T@X
+        target = omega_k.T@fc.inv(Q)@omega_k + ytilde_k.T@fc.inv(R)@ytilde_k + self.gamma*X.T@self.H@X #
         return target
 
 def main():
