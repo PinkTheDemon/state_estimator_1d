@@ -26,6 +26,7 @@ class RL_Observer(est.Estimator):
         self.dim_omega = self.model.dim_state
         self.N = self.model.dim_state
         self.gamma = gamma
+        self.value_list = []
         # 可变
         super().__init__(name="RL_Observer", x0_hat=x0_hat, P0_hat=P0_hat)
         self.rH = 2*self.dim_omega if self.model.modelErr else self.dim_omega
@@ -40,16 +41,20 @@ class RL_Observer(est.Estimator):
         self.ytilde_list = []
         self.omega_list = []
         self.X = None
+        self.value = 0
+        multiper = 1
+        for value in self.value_list :
+            self.value += multiper*value
+            multiper *= self.gamma
+        self.value_list = []
 
     def estimate(self, y, Q, R, enableNoise=False) -> None:
         ds = self.model.dim_state
         du = self.dim_omega
         if len(self.omega_list) < self.N+1: 
             # 小于nx维的时候，用EKF
-            ekf = est.EKF_class(f_fn=self.model.f, h_fn=self.model.h, F_fn=self.model.F, H_fn=self.model.H, x0_hat=self.x_hat, P0_hat=self.P_hat)
             x_pre = self.model.f(x=self.x_hat)
-            ekf.estimate(y=y, Q=Q, R=R)
-            self.x_hat, self.P_hat = ekf.x_hat, ekf.P_hat
+            self.x_hat, self.P_hat = EKF(x=self.x_hat, P=self.P_hat, y_next=y, model=self.model, Q=Q, R=R)
             self.y_hat = self.model.h(self.x_hat)
             self.omega_list.append(self.x_hat-x_pre)
             self.y_list.append(y)
@@ -72,8 +77,25 @@ class RL_Observer(est.Estimator):
             self.y_hat = self.model.h(x=self.x_hat)
             self.ytilde_list = [y - self.y_hat]
             self.y_list = [y]
+            ytilde = (y - self.y_hat).reshape(-1,1)
+            self.value_list.append(self.X.T@self.X + omega.T@fc.inv(Q)@omega)
 
     def calKoptim(self, Q, R) -> None:
+        # def calAreal(A0, A):
+        #     delta = A - A0
+        #     ALQR = np.vstack((np.zeros_like(A0), A0))
+        #     ALQR = np.hstack((np.vstack((A, delta)), ALQR))
+        #     CLQR = np.vstack((np.zeros_like(C0), C0))
+        #     CLQR = np.hstack((np.vstack((C, deltaC)), CLQR))
+        #     Q_LQR = np.array([[0,0],
+        #                         [0,10]])
+        #     # Q_LQR = fc.block_diag((fc.inv(R), fc.inv(R)))
+        #     R_LQR = fc.inv(Q)
+        #     BLQR = np.vstack((np.zeros_like(A), -np.eye(A.shape[0])))
+        #     Poptim = cal_Poptim(A=ALQR, B=BLQR, C=CLQR, Q=Q_LQR, R=R_LQR, gamma=0.0007, tol=1e-8)
+        #     delta = (-self.gamma*fc.inv(R+ self.gamma*BLQR.T@Poptim@BLQR)@BLQR.T@Poptim@ALQR)[:,:ds]
+        #     A0 = A0 + delta
+        #     return A0
         ds = self.model.dim_state
         A = self.model.F_real()
         A0 = self.model.F()
@@ -81,6 +103,14 @@ class RL_Observer(est.Estimator):
         C = self.model.H_real()
         C0 = self.model.H()
         deltaC = C - C0
+        # A0_list = [A0]
+        # while True:
+        #     A0 = calAreal(A=A, A0=A0)
+        #     A0_list.append(A0)
+        #     if len(A0_list) > 10:
+        #         del A0_list[0]
+        #     if fc.isConverge(A0_list, tol=1e-6):
+        #         break
         W = -np.eye(ds)
         # _表示下标，__表示上标
         A__Nm1, A0__Nm1, U_N, Uhat_N, V_N, Vhat_N, Lambda_N, T_N, P_N, Phi_N = self.getMatrices()
@@ -100,10 +130,26 @@ class RL_Observer(est.Estimator):
             Mhat = np.hstack((Mhat_omega, Mhat_y, Mhat_ytilde))
             M = np.vstack((M, Mhat))
             # 计算Pinv_optim(模型误差情况下)
-            B = -np.eye(ds)
-            Poptim = cal_Poptim(A=A, B=B, C=C, Q=fc.inv(R), R=fc.inv(Q), gamma=self.gamma)
-            F = -self.gamma*fc.inv(R+ self.gamma*B.T@Poptim@B)@B.T@Poptim@A
-            F = np.hstack((deltaA, F-deltaA))
+            A0 = np.vstack((np.zeros_like(A0), A0))
+            A0 = np.hstack((np.vstack((A, deltaA)), A0))
+            C0 = np.vstack((np.zeros_like(C0), C0))
+            C0 = np.hstack((np.vstack((C, deltaC)), C0))
+            Q_LQR = fc.block_diag((fc.inv(R), fc.inv(R)))
+            R_LQR = fc.inv(Q)#np.zeros_like(Q)#
+            B0 = np.vstack((np.zeros_like(A), -np.eye(A.shape[0])))
+            # Poptim = C0.T@Q_LQR@C0
+            Poptim = cal_Poptim(A=A0, B=B0, C=C0, Q=Q_LQR, R=R_LQR, gamma=1, tol=1e-8)
+            F1 = (-self.gamma*fc.inv(R_LQR+ self.gamma*B0.T@Poptim@B0)@B0.T@Poptim@A0)[:1]
+            Poptim = cal_Poptim(A=A0, B=B0, C=C0, Q=Q_LQR, R=R_LQR, gamma=1, tol=1e-8)
+            F2 = (-self.gamma*fc.inv(R_LQR+ self.gamma*B0.T@Poptim@B0)@B0.T@Poptim@A0)[1:]
+            F = np.vstack((F1, F2))
+            # Poptim = C0.T@Q_LQR@C0
+            # F = -0.01*self.gamma*(self.gamma*B0.T@Poptim@B0)@B0.T@Poptim@A0
+            F = A0[ds:]
+            # B = -np.eye(ds)
+            # Poptim = cal_Poptim(A=A, B=B, C=C, Q=fc.inv(R), R=fc.inv(Q), gamma=self.gamma)
+            # F = -self.gamma*fc.inv(R+ self.gamma*B.T@Poptim@B)@B.T@Poptim@A
+            # F = np.hstack((deltaA, F-deltaA))
         else :
             M_ytilde = A__N@V_N_linv
             M_omega = U_N - M_ytilde@T_N
@@ -114,6 +160,30 @@ class RL_Observer(est.Estimator):
         # 计算H*
         self.M = M
         K = F@M
+        # 计算A_H矩阵
+        do = self.model.dim_obs
+        N = self.model.dim_state
+        C0 = self.model.H()
+        da = N*(ds+2*do) if self.model.modelErr else N*(ds+do)
+        A_H = np.zeros((ds, da))
+        padWidth = ((0, 0), (0, da - (N-1)*ds))
+        A_H = np.vstack((A_H, np.pad(np.eye((N-1)*ds), padWidth)))
+        if self.model.modelErr:
+            A_H = np.vstack((A_H, np.hstack((C, np.zeros_like(C)))@M))
+            padWidth = ((0, 0), (N*ds, (N+1)*do))
+            A_H = np.vstack((A_H, np.pad(np.eye((N-1)*do), padWidth)))
+        A_H = np.vstack((A_H, np.hstack((deltaC, C0))@M))
+        padWidth = ((0, 0), (da-(N)*do, do))
+        A_H = np.vstack((A_H, np.pad(np.eye((N-1)*do), padWidth)))
+        self.A_H = A_H
+        # 计算Kcmp
+        H = M.T@Poptim@M
+        B = np.pad(np.eye(ds), ((0, da-ds), (0, 0)))
+        C = np.hstack((deltaC, C0))@M
+        # Hoptim = est.cal_Poptim(A=A_H, B=B, C=C, Q=fc.inv(R), R=fc.inv(Q)) # H本身不满秩，应该无法这样计算H*
+        H1 = H[:ds]
+        H11 = H1[:, :ds]
+        Kcmp = -fc.inv(fc.inv(Q)+H11)@H1@A_H
         return K
 
     def train(self, x_batch_test, y_batch_test, trainParams, estParams):
@@ -344,7 +414,7 @@ class RL_Observer(est.Estimator):
             b_batch.extend(b_seq[1:])
         return A_batch, b_batch
 
-    def calTDtarget(self, X):
+    def calTDtarget(self, X, Q, R):
         do = self.model.dim_obs
         du = self.dim_omega
         N = self.N
@@ -352,15 +422,15 @@ class RL_Observer(est.Estimator):
         omega_k = X[:du]
         ytilde_k = X[-N*do:-(N-1)*do]
         # 计算TDtarget
-        target = omega_k.T@omega_k + ytilde_k.T@ytilde_k + X.T@X
+        target = omega_k.T@fc.inv(Q)@omega_k + ytilde_k.T@fc.inv(R)@ytilde_k + self.gamma*X.T@self.H@X #
         return target
 
 def main():
     #region 测试的模型和参数
     model = getModel(modelName="Dynamics2")
-    model.modelErr = False
-    model.f = model.f_real
-    model.F = model.F_real
+    # model.modelErr = False
+    # model.f = model.f_real
+    # model.F = model.F_real
     steps = 100
     episodes = 100
     randSeed = 10086

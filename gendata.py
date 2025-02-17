@@ -14,16 +14,16 @@ def generate_data(model, modelParam, steps, randSeed):
     else :
         initial_state = modelParam["x0_mu"] + np.random.multivariate_normal(np.zeros_like(modelParam["x0_mu"]), modelParam["P0"])
     # 生成噪声序列
-    if not hasattr(modelParam, "Q") or modelParam["Q"] is None:
-        disturb_list = np.zeros((steps, model.dim_state))
+    if "Q" not in modelParam or modelParam["Q"] is None:
+        disturb_list = [None for _ in range(steps)]
     else : 
-        if not hasattr(modelParam, "disturbMu") or modelParam["disturbMu"] is None:
+        if "disturbMu" not in modelParam or modelParam["disturbMu"] is None:
             modelParam["disturbMu"] = np.zeros(model.dim_state)
         disturb_list = np.random.multivariate_normal(modelParam["disturbMu"], modelParam["Q"], steps)
-    if not hasattr(modelParam, "R") or modelParam["R"] is None:
-        noise_list = np.zeros((steps, model.dim_obs))
+    if "R" not in modelParam or modelParam["R"] is None:
+        noise_list = [None for _ in range(steps)]
     else : 
-        if not hasattr(modelParam, "noiseMu") or modelParam["noiseMu"] is None:
+        if "noiseMu" not in modelParam or modelParam["noiseMu"] is None:
             modelParam["noiseMu"] = np.zeros(model.dim_obs)
         noise_list = np.random.multivariate_normal(modelParam["noiseMu"], modelParam["R"], steps)
     # 生成状态序列和观测序列
@@ -36,6 +36,10 @@ def generate_data(model, modelParam, steps, randSeed):
         x = x_next
         x_seq.append(x_next)
         y_seq.append(y_next)
+    # 额外的外部扰动（未知且不希望有的）
+    if hasattr(model, "ext_y") :
+        ext_y = model.ext_y()
+        y_seq = [y+e_y for y,e_y in zip(y_seq, ext_y)]
     return x_seq, y_seq
 
 # 生成并保存数据轨迹
@@ -76,6 +80,10 @@ def generate_trajectories(modelName, steps, episodes, randSeed, isSave=True):
 
 # 根据相关信息获取数据，对外接口
 def getData(modelName, steps, episodes, randSeed):
+    isReverse = False
+    if "Reverse" in modelName:
+        isReverse = True
+        modelName = "Dynamics" + modelName[7:]
     fileName = f"data/{modelName}_steps{steps}_episodes{episodes}_randomSeed{randSeed}.bin"
     if os.path.isfile(fileName) :
         with open(file=fileName, mode="rb") as f:
@@ -84,6 +92,9 @@ def getData(modelName, steps, episodes, randSeed):
         trajs = generate_trajectories(modelName=modelName, steps=steps, episodes=episodes, randSeed=randSeed, isSave=False)
     x_batch = trajs["x_batch"]
     y_batch = trajs["y_batch"]
+    if isReverse :
+        x_batch = [x_seq[::-1] for x_seq in x_batch]
+        y_batch = [y_seq[::-1] for y_seq in y_batch]
     return x_batch, y_batch
 
 if __name__ == "__main__":

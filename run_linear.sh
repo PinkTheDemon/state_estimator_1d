@@ -27,7 +27,7 @@ do
     do 
         for cov in "${cov_list[@]}"
         do
-            python ./linear.py --cov $cov --goodInit $goodInit --gamma $gamma
+            python ./linear.py --cov $cov --gamma $gamma # --goodInit $goodInit
         done
     done
 done

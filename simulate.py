@@ -44,9 +44,10 @@ def simulate(agent:est.Estimator, estParams, x_batch, y_batch, isPrint=False, is
         xhat_batch.append(xhat_seq)
         yhat_batch.append(yhat_seq)
         Phat_batch.append(Phat_seq)
+        agent.reset(x0_hat=estParams["x0_hat"], P0_hat=estParams["P0_hat"])
     #endregion 状态估计
     # 计算性能指标
-    MSE_x, RMSE_x = fc.calMSE(x_batch=x_batch, xhat_batch=xhat_batch)
+    MSE_x, RMSE_x = fc.calMSE(x_batch=[x_seq[3:] for x_seq in x_batch], xhat_batch=[x_seq[3:] for x_seq in xhat_batch])
     MSE_y, RMSE_y = fc.calMSE(x_batch=y_batch, xhat_batch=yhat_batch)
     # 打印
     if isPrint:
@@ -62,13 +63,13 @@ def simulate(agent:est.Estimator, estParams, x_batch, y_batch, isPrint=False, is
 
 if __name__ == "__main__" : 
     # 选择模型、仿真步数以及轨迹条数
-    model = getModel(modelName="Dynamics2")
+    model = getModel(modelName="Dynamics1")
     steps = 100
     episodes = 100
     randSeed = 10086
-    modelErr = True
+    modelErr = False
     isPrint = True
-    isPlot = False
+    isPlot = True
     # 选择执行测试的方法
     test_options = ["EKF"] # , "UKF", "UKF-MHE", "FIE", "IEKF", "EKF-MHE"
     # 生成数据以及参数
@@ -89,19 +90,22 @@ if __name__ == "__main__" :
     #region 测试
     for status in test_options:
         if "MHE" in status.upper():
-            for i in range(1,10):
+            for i in range(1,2):
                 estParams["window"] = i
                 print("EKF-MHE, window length:", estParams["window"])
-                logfile.flush()
-                simulate(model=model, args=None, agent=None, sim_num=50, rand_seed=10086, STATUS=status, x_batch=x_batch, y_batch=y_batch, plot_flag=False)
+                # 生成EKF类
+                f, h, F, H = getSysFuns(model=model, modelErr=estParams["modelErr"])
+                agent = est.MHE(f_fn=f, h_fn=h, F_fn=F, H_fn=H, window=estParams["window"])
+                simulate(agent=agent, estParams=estParams, x_batch=x_batch, y_batch=y_batch, isPrint=isPrint, isPlot=isPlot)
                 print("********************")
+                logfile.flush()
         else :
             print(f"{status.upper()}:", flush=True)
             # 生成EKF类
             f, h, F, H = getSysFuns(model=model, modelErr=estParams["modelErr"])
-            ekf = est.EKF_class(f_fn=f, h_fn=h, F_fn=F, H_fn=H)
-            simulate(agent=ekf, estParams=estParams, x_batch=x_batch, y_batch=y_batch, isPrint=isPrint, isPlot=isPlot)
+            agent = est.EKF_class(f_fn=f, h_fn=h, F_fn=F, H_fn=H)
+            simulate(agent=agent, estParams=estParams, x_batch=x_batch, y_batch=y_batch, isPrint=isPrint, isPlot=isPlot)
             print("********************")
-    logfile.flush()
+            logfile.flush()
     logfile.endLog()
     #endregion

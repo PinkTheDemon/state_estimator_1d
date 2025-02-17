@@ -35,12 +35,16 @@ def block_diag(matrix_list) :
 # inverse of lower triangular matrix M
 def inv(M:np.ndarray) : 
     if M.shape == (1,1) : 
-        return 1/M 
+        M_inv = 0 if M.item() == 0 else 1/M
+    elif np.linalg.matrix_rank(M) < M.shape[0]: # 不满秩方阵
+        U, S, V = np.linalg.svd(M)
+        S = np.diag([1/s if s != 0 else 0 for s in S])
+        M_inv = V.T @ S @ U.T
     else :
         L = np.linalg.cholesky(M)
         L_inv = np.linalg.inv(L)
         M_inv = L_inv.transpose(*range(L_inv.ndim - 2), -1, -2) @ L_inv
-        return M_inv
+    return M_inv
 
 
 def delete_empty(M) : 
@@ -210,7 +214,7 @@ def vec2mat(vec:np.array, m=None, n=None) -> np.array:
         matrix[indices[1]+1, indices[0]] = matrix[indices[0], indices[1]+1]
     return matrix.T if transpose else matrix
 
-def EVD(M:np.ndarray):
+def EVD(M:np.ndarray, rank=None):
     '''实矩阵特征值分解'''
     eigenvalues, eigenvectors = np.linalg.eigh(M)
     # 筛去近0特征值（可能是由于数值计算误差产生的非常小的值）
@@ -221,6 +225,8 @@ def EVD(M:np.ndarray):
     U = eigenvectors[:, valid_indices]
     E = np.linalg.cholesky(np.diag(v=eigenvalues))
     L = U @ E
+    if rank is not None:
+        L = np.pad(L, ((0,rank-L.shape[0]),(0,0)))
     return L
 
 def calMSE(x_batch, xhat_batch):
