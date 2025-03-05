@@ -30,17 +30,19 @@ def generate_data(model, modelParam, steps, randSeed):
     t_seq = range(steps)
     x_seq = []
     y_seq = []
+    u_seq = []
     x = initial_state
     for t in t_seq : # 真实轨迹
-        x_next, y_next = model.step(x, disturb=disturb_list[t], noise=noise_list[t], isReal=True)
+        x_next, y_next, u_next = model.step(x, disturb=disturb_list[t], noise=noise_list[t], isReal=True)
         x = x_next
         x_seq.append(x_next)
         y_seq.append(y_next)
+        u_seq.append(u_next)
     # 额外的外部扰动（未知且不希望有的）
     if hasattr(model, "ext_y") :
         ext_y = model.ext_y()
         y_seq = [y+e_y for y,e_y in zip(y_seq, ext_y)]
-    return x_seq, y_seq
+    return x_seq, y_seq, u_seq
 
 # 生成并保存数据轨迹
 def generate_trajectories(modelName, steps, episodes, randSeed, isSave=True):
@@ -55,13 +57,15 @@ def generate_trajectories(modelName, steps, episodes, randSeed, isSave=True):
     trajs = {
         "x_batch": [],
         "y_batch": [],
+        "u_batch": [],
     }
     model = getModel(modelName=modelName)
     modelParam = getModelParams(modelName=modelName)
     for num in range(episodes):
-        x_seq, y_seq = generate_data(model=model, modelParam=modelParam, steps=steps, randSeed=randSeed+num)
+        x_seq, y_seq, u_seq = generate_data(model=model, modelParam=modelParam, steps=steps, randSeed=randSeed+num)
         trajs["x_batch"].append(x_seq)
         trajs["y_batch"].append(y_seq)
+        trajs["u_batch"].append(u_seq)
 
     if isSave:
         print("Data saving, please wait...", flush=True)
@@ -92,10 +96,12 @@ def getData(modelName, steps, episodes, randSeed):
         trajs = generate_trajectories(modelName=modelName, steps=steps, episodes=episodes, randSeed=randSeed, isSave=False)
     x_batch = trajs["x_batch"]
     y_batch = trajs["y_batch"]
+    u_batch = trajs["u_batch"]
     if isReverse :
         x_batch = [x_seq[::-1] for x_seq in x_batch]
         y_batch = [y_seq[::-1] for y_seq in y_batch]
-    return x_batch, y_batch
+        u_batch = [u_seq[::-1] for u_seq in u_batch]
+    return x_batch, y_batch, u_batch
 
 if __name__ == "__main__":
-    generate_trajectories(modelName="Augment2", steps=100, episodes=100, randSeed=10086)
+    generate_trajectories(modelName="Dynamics1", steps=100, episodes=50, randSeed=10086)

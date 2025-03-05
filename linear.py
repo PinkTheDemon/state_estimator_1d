@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from typing import List
 from scipy.linalg import lstsq
 from scipy.optimize import least_squares as ls
+import pickle
 
 import params as pm
 import simulate as sim
@@ -30,24 +31,33 @@ class LSTDO(est.Estimator):
         self.h = np.random.normal(loc=0, scale=10)
         self.randomGen = func.RandomGenerator(randomFun=np.random.multivariate_normal, rand_num=randSeed)
 
-    def train(self, y_batch, Q, R, epsilon=1e3):
+    def train(self, y_batch, u_batch, Q, R, epsilon=1e3):
         #region Ptest
         ds = self.model.dim_state
-        Poptim_inv = np.array([[ 0.68245832, -0.19916496,  0.        ,  0.        ,  0.        ],
-       [-0.19916496,  0.12648837,  0.        ,  0.        ,  0.        ],
-       [ 0.        ,  0.        ,  0.68245832, -0.19916496,  0.        ],
-       [ 0.        ,  0.        , -0.19916496,  0.12648837,  0.        ],
-       [ 0.        ,  0.        ,  0.        ,  0.        ,  0.25615528]])
-        #np.array([[ 0.63128271,  0.35470852],
-                     #[ 0.35470852, 10.56484081]])
+        # Poptim_inv = np.array([[ 0.68245832, -0.19916496,  0.        ,  0.        ,  0.        ],
+        #                        [-0.19916496,  0.12648837,  0.        ,  0.        ,  0.        ],
+        #                        [ 0.        ,  0.        ,  0.68245832, -0.19916496,  0.        ],
+        #                        [ 0.        ,  0.        , -0.19916496,  0.12648837,  0.        ],
+        #                        [ 0.        ,  0.        ,  0.        ,  0.        ,  0.25615528]]) # 模型已知
+        Poptim_inv = np.array([[ 1.00000000e-01,  0.00000000e+00,  0.00000000e+00,  0.00000000e+00,  0.00000000e+00],
+                               [ 0.00000000e+00,  7.99993600e-06,  0.00000000e+00,  0.00000000e+00,  0.00000000e+00],
+                               [ 0.00000000e+00,  0.00000000e+00,  6.82458323e-01, -1.99164959e-01,  0.00000000e+00],
+                               [ 0.00000000e+00,  0.00000000e+00, -1.99164959e-01,  1.26488371e-01,  0.00000000e+00],
+                               [ 0.00000000e+00,  0.00000000e+00,  0.00000000e+00,  0.00000000e+00,  2.56155281e-01]]) # 部分模型未知
+        # Poptim_inv = np.array([[1.27478034, 1.        ],
+        #                        [1.        , 1.        ]])
         H_abserror_batch = [np.linalg.norm(self.H - Poptim_inv, ord='fro')]
+        h_abserror_batch = [np.abs(self.h - 0)]
+        H_batch = [self.H]
+        h_batch = [self.h]
         # h_abserror_batch = []
         delta_batch = []
         # if converge
         params_batch = []
         #endregion
-        for i in range(len(y_batch)):
-            y_seq = y_batch[i]
+        for i in range(1*len(y_batch)):
+            y_seq = y_batch[i%len(y_batch)]
+            u_seq = u_batch[i%len(u_batch)]
             self.reset(x0_hat=self.x0_hat, P0_hat=None)
             params = np.insert(func.vectorize(self.H), obj=-1, values=self.h).reshape((-1,1)) # 递归LS
             A = 0 # LS
@@ -57,19 +67,25 @@ class LSTDO(est.Estimator):
             delta_batch.append(0)
             ksi = self.randomGen.getRandomList(length=len(y_seq), mean=np.zeros(ds), cov=epsilon*np.eye(ds))
             P = np.eye(func.ds2do(ds))
+            # 理论对照
+            H = func.inv(Q + self.gamma*self.model.F() @ func.inv(self.H) @ self.model.F().T) + self.model.H().T @ func.inv(R) @ self.model.H()
+            # ---
             for t in t_seq:
-                result = est.NLSF_uniform(P_inv=self.H, y_seq=[y_seq[t]], Q=Q, R=R, gamma=self.gamma, 
+                result = est.NLSF_uniform(P_inv=self.H, y_seq=[y_seq[t]], u_seq=[u_seq[t]], Q=Q, R=R, gamma=self.gamma, 
                                           f=self.model.f, h=self.model.h, F=self.model.F, H=self.model.H,
                                           mode="quadratic", x0=[self.x_hat], x0_bar=self.x_hat)
                 self.x_hat = result.x[-ds:]
                 x_hat_seq.append(self.x_hat)
+                # if (t < 25) : 
+                #     continue
                 x_next_noise = self.x_hat+ksi[t]
-                result = est.NLSF_uniform(P_inv=self.H, y_seq=[], Q=Q, R=R, gamma=self.gamma, 
+                result = est.NLSF_uniform(P_inv=self.H, y_seq=[], u_seq=[], Q=Q, R=R, gamma=self.gamma, 
                                           f=self.model.f, h=self.model.h, F=self.model.F, H=self.model.H, 
                                           mode="quadratic-end", x0=x_hat_seq[t], x0_bar=x_hat_seq[t], xend=x_next_noise)
-                Voptim = result.fun@result.fun + (y_seq[t] - self.model.h(x_next_noise))@func.inv(R)@(y_seq[t] - self.model.h(x_next_noise)) + self.h
-                delta_batch[-1] += np.abs(Voptim - ksi[t].reshape((1,-1))@ksi[t].reshape((-1,1)) - self.h).item()
-                gradient = func.vectorize(ksi[t].reshape((-1,1))@ksi[t].reshape((1,-1)))
+                Voptim = result.fun@result.fun + (y_seq[t] - self.model.h(x_next_noise))@func.inv(R)@(y_seq[t] - self.model.h(x_next_noise)) + self.gamma * self.h
+                delta_batch[-1] += np.abs(Voptim - ksi[t].reshape((1,-1))@self.H@ksi[t].reshape((-1,1)) - self.h).item()/len(y_seq)
+                # gradient = func.vectorize(ksi[t].reshape((-1,1))@ksi[t].reshape((1,-1))) # 这里应该就不是vectorize了，而是直接取下三角然后拉直，否则系数对不上
+                gradient = func.vectorize(ksi[t].reshape((-1,1))@ksi[t].reshape((1,-1)), triangle_only=True)
                 gradient = np.concatenate((gradient, np.ones((1,)))).reshape((1,-1))
                 #region 递归最小二乘
                 P = P - P@gradient.T@gradient@P/(1+(gradient@P@gradient.T).item())
@@ -88,12 +104,23 @@ class LSTDO(est.Estimator):
             #     b += Voptim*gradient.T
             #     A += gradient.T@gradient
             # newParams = np.linalg.solve(a=A, b=b)
-            # self.H = vec2mat(newParams.flatten()[:-1])
+            # self.H = func.vec2mat(newParams.flatten()[:-1])
             # self.h = newParams[-1].item()
             #endregion
             H_abserror_batch.append(np.linalg.norm(self.H - Poptim_inv, ord='fro'))
+            h_abserror_batch.append(np.abs(self.h - 0))
+            H_batch.append(self.H)
+            h_batch.append(self.h)
             # h_abserror_batch.append(np.abs(self.h, ))
         #region plot error
+        #region 保存数据
+        fileName = f"data/部分模型未知/{self.model.name}_H_h_{epsilon}"
+        with open(file=fileName+".bin", mode="wb") as f:
+            pickle.dump(H_batch, f)
+            pickle.dump(h_batch, f)
+            pickle.dump(delta_batch, f)
+        return 
+        #endregion
         # H误差
         fig, ax = plt.subplots()
         plt.yscale('log')
@@ -105,6 +132,17 @@ class LSTDO(est.Estimator):
         ax.set_ylabel('||H-P$^{*-1}$||$_F$')
         ax.set_title('(H-P$^{*-1}$)的Frobenius范数')
         ax.legend()
+        # h误差
+        # fig, ax = plt.subplots()
+        # plt.yscale('log')
+        # plt.grid(True)
+        # ax.plot(range(len(h_abserror_batch)), h_abserror_batch, 'o', color='r', linestyle='--', label="value")
+        # ax.plot(range(len(h_abserror_batch)), np.average(h_abserror_batch)*np.ones_like(h_abserror_batch), color='r', label="average")
+        # ax.set_xlim(0, len(h_abserror_batch))
+        # ax.set_xlabel('迭代次数')
+        # ax.set_ylabel('|h-c$^{*}$|')
+        # ax.set_title('(h-c$^{*}$)的绝对值')
+        # ax.legend()
         # δ误差
         fig, ax = plt.subplots()
         plt.yscale('log')
@@ -119,8 +157,8 @@ class LSTDO(est.Estimator):
         plt.show()
         #endregion
 
-    def estimate(self, y, Q, R): #gamma 会不会起到作用？
-        result = est.NLSF_uniform(P_inv=self.H, y_seq=[y], Q=Q, R=R, gamma=self.gamma, 
+    def estimate(self, y, u, Q, R): #gamma 会不会起到作用？
+        result = est.NLSF_uniform(P_inv=self.H, y_seq=[y], u_seq=[u], Q=Q, R=R, gamma=self.gamma, 
                                   f=self.model.f, h=self.model.h, F=self.model.F, H=self.model.H, 
                                   mode="quadratic", x0=[self.x_hat], x0_bar=self.x_hat)
         self.x_hat = result.x[-self.model.dim_state:]
@@ -562,19 +600,19 @@ def main():
     # model.f = model.f_real
     # model.F = model.F_real
     steps = 100
-    episodes = 100
+    episodes = 50
     randSeed = 10086
     #endregion
     #region define LSTDO estimator, train and test
     estParams = pm.getEstParams(modelName=model.name)
     args = pm.parseParams()
     trainParams = pm.getTrainParams(estorName="RL_Observer", cov=eval(args.cov), goodInit=args.goodInit, gamma=args.gamma)
-    _, y_batch_train = getData(modelName=model.name, steps=trainParams["steps"], episodes=trainParams["episodes"], randSeed=trainParams["randSeed"])
-    LSTDO_estimator = LSTDO(model=model, x0_hat=estParams["x0_hat"], gamma=0.9, randSeed=11111)
-    LSTDO_estimator.train(y_batch=y_batch_train, Q=estParams["Q"], R=estParams["R"], epsilon=1e4)
+    _, y_batch_train, u_batch_train = getData(modelName=model.name, steps=trainParams["steps"], episodes=trainParams["episodes"], randSeed=trainParams["randSeed"])
+    LSTDO_estimator = LSTDO(model=model, x0_hat=estParams["x0_hat"], gamma=1.0, randSeed=11111)
+    LSTDO_estimator.train(y_batch=y_batch_train, u_batch=u_batch_train, Q=estParams["Q"], R=estParams["R"], epsilon=1e5)
     # test
-    x_batch_test, y_batch_test = getData(modelName=model.name, steps=steps, episodes=episodes, randSeed=randSeed)
-    sim.simulate(agent=LSTDO_estimator, estParams=estParams, x_batch=x_batch_test, y_batch=y_batch_test, isPrint=True, isPlot=True)
+    x_batch_test, y_batch_test, u_batch_test = getData(modelName=model.name, steps=steps, episodes=episodes, randSeed=randSeed)
+    # sim.simulate(agent=LSTDO_estimator, estParams=estParams, x_batch=x_batch_test, y_batch=y_batch_test, u_batch=u_batch_test, isPrint=True, isPlot=False)
     #endregion
     #region define RL_Observer, train and test
     # estParams = pm.getEstParams(modelName=model.name)

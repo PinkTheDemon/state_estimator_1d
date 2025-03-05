@@ -88,9 +88,34 @@ class EKF_class(Estimator):
     def estimate(self, y, Q, R, u=None):
         self.predict(Q=Q, u=u)
         self.update(y=y, R=R)
-        if self.x_hat.size == 4: 
-            self.x_hat[0] = 0
-            self.x_hat[1] = 0
+        # if self.x_hat.size == 4: 
+        #     self.x_hat[0] = 0
+        #     self.x_hat[1] = 0
+
+class GKF_class(Estimator): # 用于广义系统的KF
+    def __init__(self, f_fn, h_fn, F_fn, H_fn, x0_hat=None, P0_hat=None) -> None:
+        self.f_fn = f_fn
+        self.h_fn = h_fn
+        self.F_fn = F_fn
+        self.H_fn = H_fn
+        super().__init__(name="EKF", x0_hat=x0_hat, P0_hat=P0_hat)
+
+    def estimate(self, y, Q, R, u=None):
+        if not hasattr(self, "E") :
+            n = Q.shape[0]
+            non_zeros = [i for i in range(n) if np.linalg.norm(Q[i]) != 0]
+            r = len(non_zeros)
+            E = np.zeros((r,n))
+            for i in range(r) : E[i, non_zeros[i]] = 1
+            self.E = E
+        E = self.E
+        A = E @ self.F_fn()
+        C = self.H_fn()
+        Q = E @ Q @ E.T
+        self.P_hat = E.T @ inv(Q + A @ self.P_hat @ A.T) @ E + C.T @ R @ C
+        self.P_hat = inv(self.P_hat)
+        self.x_hat = E.T @ A @ self.x_hat - self.P_hat @ C.T @ inv(R) @ (C @ E.T @ A @ self.x_hat - y)
+        self.y_hat = self.h_fn(x=self.x_hat)
 
 class MHE(Estimator):
     def __init__(self, f_fn, h_fn, F_fn, H_fn, window, x0_hat=None, P0_hat=None) -> None:
@@ -106,13 +131,17 @@ class MHE(Estimator):
         if x0_hat is not None : self.dim_state = x0_hat.size
         self.P_hat = P0_hat
         self.y_seq = []
+        self.u_seq = []
         self.x0_bar_seq = [x0_hat]
 
     def estimate(self, y, Q, R, u=None, P_inv=None):
         self.y_seq.append(y)
-        if len(self.y_seq) > self.window : del self.y_seq[0]
+        self.u_seq.append(u)
+        if len(self.y_seq) > self.window : 
+            del self.y_seq[0]
+            del self.u_seq[0]
         if P_inv is None : P_inv = inv(self.P_hat)
-        result = NLSF_uniform(P_inv=P_inv, y_seq=self.y_seq, Q=Q, R=R, f=self.f_fn, h=self.h_fn, F=self.F_fn, H=self.H_fn, 
+        result = NLSF_uniform(P_inv=P_inv, y_seq=self.y_seq, u_seq=self.u_seq, Q=Q, R=R, f=self.f_fn, h=self.h_fn, F=self.F_fn, H=self.H_fn, 
                               mode="quadratic", x0=self.x0_bar_seq[:], x0_bar=self.x0_bar_seq[0])
         self.x_hat = result.x[-self.dim_state:]
         self.y_hat = self.h_fn(x=self.x_hat)
@@ -204,13 +233,13 @@ class MHE(Estimator):
 #     return x_next_hat.reshape(-1), P_next_hat
 
 
-def NLSF_uniform(P_inv, y_seq, Q, R, f, h, F, H, mode:str="quadratic", x0=None, **args) : 
+def NLSF_uniform(P_inv, y_seq, u_seq, Q, R, f, h, F, H, mode:str="quadratic", x0=None, **args) : 
     if "sumofsquares" in mode.lower() : 
         fun = SumOfSquares(f_fn=f, h_fn=h, F_fn=F, H_fn=H)
-        params = [P_inv, y_seq, Q, R]
+        params = [P_inv, y_seq, u_seq, Q, R]
     elif "quadratic" in mode.lower() : 
         fun = Quadratic(f_fn=f, h_fn=h, F_fn=F, H_fn=H)
-        params = [P_inv, y_seq, Q, R, args["x0_bar"]]
+        params = [P_inv, y_seq, u_seq, Q, R, args["x0_bar"]]
 
     if "gamma" in args.keys() : params.append(args["gamma"])
     if "end" in mode.lower() : params.append(args["xend"])
@@ -277,15 +306,16 @@ class Quadratic() :
         self.F_fn = F_fn
         self.H_fn = H_fn
 
-    def res_fun(self, x, P_inv, y_seq, Q, R, x0_bar, gamma=1.0, xend=None) : 
+    def res_fun(self, x, P_inv, y_seq, u_seq, Q, R, x0_bar, gamma=1.0, xend=None) : 
         num_obs = len(y_seq)
         ds = x.size // (num_obs+1)
 
         f = np.array(x[:ds] - x0_bar)[np.newaxis,:]
         M = np.copy(P_inv)
         for i in range(num_obs) : 
-            f = np.hstack((f, x[ds*(i+1):ds*(i+2)]-self.f_fn(x[ds*(i):ds*(i+1)])[np.newaxis,:], 
-                              y_seq[i]-self.h_fn(x[ds*(i+1):ds*(i+2)])[np.newaxis,:]))
+            if u_seq[i] is None : u_seq[i] = 0
+            f = np.hstack((f, (x[ds*(i+1):ds*(i+2)]-self.f_fn(x[ds*(i):ds*(i+1)])-u_seq[i])[np.newaxis,:], 
+                              (y_seq[i]-self.h_fn(x[ds*(i+1):ds*(i+2)]))[np.newaxis,:]))
             M = block_diag((M * gamma, inv(Q), inv(R)))
         
         if xend is not None : 
@@ -301,7 +331,7 @@ class Quadratic() :
         L = np.linalg.cholesky(M)
         return (f@L).reshape(-1)
 
-    def jac_fun(self, x, P_inv, y_seq, Q, R, x0_bar, gamma=1.0, xend=None) : 
+    def jac_fun(self, x, P_inv, y_seq, u_seq, Q, R, x0_bar, gamma=1.0, xend=None) : 
         num_obs = len(y_seq)
         ds = int(x.size / (num_obs+1))
         jadd = lambda x0, x1 : np.vstack((np.hstack((-self.F_fn(x0), np.eye(ds))), np.pad(-self.H_fn(x1), ((0,0),(ds,0)))))

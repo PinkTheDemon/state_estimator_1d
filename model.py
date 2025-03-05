@@ -19,15 +19,19 @@ class Model:
         h = self.h_real if isReal else self.h
         x_next = f(x=x)
         if disturb is not None : x_next += disturb
+        u_next = self.u()
+        if u_next is not None : x_next += u_next
         y_next = h(x=x_next)
         if noise is not None : y_next += noise
-        return x_next, y_next
+        return x_next, y_next, u_next
 
     #region 虚函数，子类具体实现，子类没有的话可以直接raise error
     def f(self):
         pass
     def h(self):
         pass
+    def u(self):
+        return None
     def F(self):
         pass
     def H(self):
@@ -46,7 +50,8 @@ class Model:
 class Dynamics1(Model):
     def __init__(self) -> None:
         super().__init__("Dynamics1", 5, 3)
-        self.modelErr = True
+        self.modelErr = False
+        self.t = 0
 
     def f(self, x, **args) : 
         # disceret form
@@ -55,9 +60,9 @@ class Dynamics1(Model):
         return x
 
     def F(self, x=None, **args) : 
-        return np.array([[1, 0, 0, 0, 0],
+        return np.array([[1, 0.1, 0, 0, 0],
                          [0, 1, 0, 0, 0],
-                         [0, 0, 1, 0, 0],
+                         [0, 0, 1, 0.1, 0],
                          [0, 0, 0, 1, 0],
                          [0, 0, 0, 0, 1]])
     
@@ -73,6 +78,12 @@ class Dynamics1(Model):
                          [0, 0, 1, 0.1, 0],
                          [0, 0, 0, 1, 0],
                          [0, 0, 0, 0, 1]])
+    
+    # def u(self):
+    #     t = self.t
+    #     u = np.array([0, np.sin(np.pi*t/10), 0, np.cos(np.pi*t/10), 0])
+    #     self.t += 1
+    #     return u
 
     def h(self, x, **args) : 
         H = self.H()
@@ -104,14 +115,15 @@ class Dynamics2(Model):
         if batch_first is True : x = x.T
         x_next = np.zeros_like(x)
         x_next[0] = 0.95*x[0] + 0.10*x[1]#x_next[0] = 0.65*x[0] + 0.40*x[1]
-        x_next[1] = -0.78*x[0] + 0.74*x[1]
+        x_next[1] = -0.98*x[0] + 0.94*x[1]
         x = x_next
         if batch_first is True : x = x.T
         return x
 
     def F(self, x=None, **args) : 
         return np.array([[0.95, 0.10], #return np.array([[0.65, 0.40], 
-                        [-0.78, 0.74]])
+                        [-0.98, 0.94]])
+        # return np.array([[0.95, 0.10]])
     
     def f_real(self, x, batch_first:bool=True, **args) : 
         # disceret form
@@ -140,10 +152,10 @@ class Dynamics2(Model):
         return y
 
     def H(self, x=None, **args) : 
-        return np.array([[1,1]])
+        return np.array([[1.,1.]])
     
     def H_real(self, **args) : 
-        return np.array([[1,1]])
+        return np.array([[1.,1.]])
 
 class Dynamics3(Model):
     def __init__(self) -> None:

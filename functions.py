@@ -162,7 +162,7 @@ class RandomGenerator :
             randomList.append(self.getRandom(**args))
         return randomList
     
-def vectorize(M:np.array) -> np.array:
+def vectorize(M:np.array, triangle_only=False) -> np.array:
     '''
     对称矩阵化为向量,矩阵维度为n*n,向量长度为n(n+1)/2
     矩阵维度为m*n,记a=min(m,n),向量长度为m*n-a(a-1)/2
@@ -176,7 +176,8 @@ def vectorize(M:np.array) -> np.array:
     # 对称的部分加到一起
     if matrix.shape[0] > 1:
         indices = np.triu_indices(matrix.shape[0]-1)
-        matrix[indices[0], indices[1]+1] *= 2
+        if triangle_only is False:
+            matrix[indices[0], indices[1]+1] *= 2
     # 取上三角矩阵的前几行索引号
     indices = np.triu_indices(matrix.shape[1])
     indices0 = indices[0][indices[0] < matrix.shape[0]]

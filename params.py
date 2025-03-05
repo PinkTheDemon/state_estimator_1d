@@ -14,7 +14,7 @@ def parseParams():
 def getModelParams(modelName):
     if modelName == "Dynamics1":
         modelParams = {
-            "x0_mu": np.array([10, 10, 10, 10, 10]),
+            "x0_mu": np.array([0, 0, 0, 0, 0]),
             "P0": np.diag((1., 1., 1., 1., 1.)),
             "Q": np.array([[0.025/3,0.25/2, 0, 0, 0],[0.25/2, 2.5, 0, 0, 0], [0, 0, 0.025/3,0.25/2, 0],[0, 0, 0.25/2, 2.5, 0], [0, 0, 0, 0, 2.5]]),
             "R": 10*np.eye(3),
@@ -58,15 +58,15 @@ def getModelParams(modelName):
 def getEstParams(modelName, **args):
     if modelName == "Dynamics1":
         estParams = {
-            "x0_hat": np.array([10, 10, 10, 10, 10]),
+            "x0_hat": np.array([0, 0, 0, 0, 0]),
             "P0_hat": np.diag((1., 1., 1., 1., 1.)),
-            "Q": np.diag((0,1,0,1,0)),#np.array([[0.025/3,0.25/2, 0, 0, 0],[0.25/2, 2.5, 0, 0, 0], [0, 0, 0.025/3,0.25/2, 0],[0, 0, 0.25/2, 2.5, 0], [0, 0, 0, 0, 2.5]]),
+            "Q": np.array([[0,0, 0, 0, 0],[0, 2.5, 0, 0, 0], [0, 0, 0.025/3,0.25/2, 0],[0, 0, 0.25/2, 2.5, 0], [0, 0, 0, 0, 2.5]]),
             "R": 10*np.eye(3),
         }
     elif modelName == "Dynamics2":
         estParams = {
-            "x0_hat": np.array([0, 0]),
-            "P0_hat": np.diag((10., 10.)),
+            "x0_hat": np.array([10, 10]),
+            "P0_hat": np.diag((1., 1.)),
             "Q": np.array([[1,0],[0,0]]),
             "R": np.array([[1]]),
         }
@@ -108,9 +108,9 @@ def getEstParams(modelName, **args):
 def getTrainParams(estorName, **args):
     if estorName == "RL_Observer":
         trainParams = {
-            "trainEpis": 100,
-            "steps": 30,
-            "episodes": 50,
+            # "trainEpis": 50,
+            "steps": 100,
+            "episodes": 100,
             "randSeed": 0,
         }
     trainParams |= args
